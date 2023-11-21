@@ -168,3 +168,23 @@ def getleaves(re,le,root,curroot,uid,hlist,mlist,merger_tree,sim_code,snapstart=
     bool4 = hlist['uids'] == uid
     hlist['prog_found'][bool4] = 1
     return hlist,mlist,merger_tree
+
+#--------------------------------------------------------------------
+#Main code
+trees = 10000
+output_name = 'halotree.npy'
+
+#The directory to the folder containing the simulation snapshots
+folder = sys.argv[-1]
+#The name of the folder containing rockstar outputs
+rockfolder = 'rockstar_halos'
+
+#Setting the minimum radius and the minimum mass for the halos
+min_r = 5e-4
+min_mass = 1e7
+
+#Building the merger history
+hlist,masses = makehlist(folder,rockfolder,trees,sim_code=sim_code,depth=7,min_r=min_r,min_mass=min_mass)
+#Writing out the output
+if yt.is_root():
+   np.save('%s/%s' % (folder,output_name),hlist)
