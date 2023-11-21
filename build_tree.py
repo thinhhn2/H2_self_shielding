@@ -1,7 +1,9 @@
 import numpy as np  
-import matplotlib.pyplot as plt
 import yt
 import ytree
+import sys,os
+import glob as glob
+import time
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -9,7 +11,7 @@ comm = MPI.COMM_WORLD
 rank = comm.rank
 nprocs = comm.size
 
-def makehlist(folder,rockfolder,numtrees,sim_code,depth=5,min_r=1e-3,min_mass=1e6):
+def makehlist(folder,rockfolder,numtrees,depth=5,min_r=1e-3,min_mass=1e6):
     #Get the current working directory (where the output will be located) to easily switch back later
     cdw = os.getcwd()
     #Changing the directory to the consistent-tree output folder
@@ -27,28 +29,28 @@ def makehlist(folder,rockfolder,numtrees,sim_code,depth=5,min_r=1e-3,min_mass=1e
     os.chdir(cdw)
       
     #Loading a snapshot parameter file to read in the refined boundary region coordinates
-    gs = np.loadtxt('%s/pfs_manual.dat' % folder,dtype=str)
+    gs = np.loadtxt('%s/pfs.dat' % folder,dtype=str)
     for i in range(len(gs)):
         params = open('%s/%s' % (folder,gs[i]))
-    for l in params:
-        #Obtain the x,y,z coordinate of the left edge
-        if l.startswith('RefineRegionLeftEdge'):
-            le_i = l.split()
-            le_i = [float(x) for x in le_i[-3:]]
-            le_i = np.array(le_i)
-            if i ==0:
-                le = le_i
-            else:
-                le = np.vstack((le,le_i))
-        #Obtain the x,y,z coordinate of the right edge
-        if l.startswith('RefineRegionRightEdge'):
-            re_i = l.split()
-            re_i = [float(x) for x in re_i[-3:]]
-            re_i = np.array(re_i)
-            if i ==0:
-                re = re_i
-            else:
-                re = np.vstack((re,re_i))
+        for l in params:
+            #Obtain the x,y,z coordinate of the left edge
+            if l.startswith('RefineRegionLeftEdge'):
+                le_i = l.split()
+                le_i = [float(x) for x in le_i[-3:]]
+                le_i = np.array(le_i)
+                if i ==0:
+                    le = le_i
+                else:
+                    le = np.vstack((le,le_i))
+            #Obtain the x,y,z coordinate of the right edge
+            if l.startswith('RefineRegionRightEdge'):
+                re_i = l.split()
+                re_i = [float(x) for x in re_i[-3:]]
+                re_i = np.array(re_i)
+                if i ==0:
+                    re = re_i
+                else:
+                    re = np.vstack((re,re_i))
 
     #Create a dictionary to store the output
     my_storage = {}
@@ -66,12 +68,12 @@ def makehlist(folder,rockfolder,numtrees,sim_code,depth=5,min_r=1e-3,min_mass=1e
         mlist = np.array([])
         merger_tree = np.array([])
         # Get the initial halo list values for the primary branch and any sub-branches
-        hlist,mlist,merger_tree = getleaves(re,le,root,rootn,uid,hlist,mlist,merger_tree,sim_code=sim_code,snapstart=0,isroot=True,min_r=min_r,min_mass=min_mass)
+        hlist,mlist,merger_tree = getleaves(re,le,root,rootn,uid,hlist,mlist,merger_tree,snapstart=0,isroot=True,min_r=min_r,min_mass=min_mass)
         for z in range(depth):
             # Check all nodes in the branch for progenitors. The number of times we do this check
             # is equivalent to the number of times we search for sub-branches
             for y in np.where( hlist['prog_found'] ==0)[0]:
-                hlist,mlist,merger_tree = getleaves(re,le,root,hlist['rootlist'][y],hlist['uids'][y],hlist,mlist,merger_tree,sim_code=sim_code,snapstart=0,min_r=min_r,min_mass=min_mass)
+                hlist,mlist,merger_tree = getleaves(re,le,root,hlist['rootlist'][y],hlist['uids'][y],hlist,mlist,merger_tree,snapstart=0,min_r=min_r,min_mass=min_mass)
         sto.result[0] = hlist
         sto.result[1] = mlist
         sto.result[2] = merger_tree
@@ -106,7 +108,7 @@ def makehlist(folder,rockfolder,numtrees,sim_code,depth=5,min_r=1e-3,min_mass=1e
         np.save('%s/merger_time.npy' % folder,merger_time)
     return hlist_f,masses
 
-def add_leaves(leaf,re,le,hlist,curroot,snapstart,sim_code,min_r=1e-3, min_mass = 1e6):
+def add_leaves(leaf,re,le,hlist,curroot,snapstart,min_r=1e-3, min_mass = 1e6):
     x = leaf['position_x'].v.tolist()
     y = leaf['position_y'].v.tolist()
     z = leaf['position_z'].v.tolist()
@@ -123,7 +125,7 @@ def add_leaves(leaf,re,le,hlist,curroot,snapstart,sim_code,min_r=1e-3, min_mass 
     return hlist
 
 
-def getleaves(re,le,root,curroot,uid,hlist,mlist,merger_tree,sim_code,snapstart=0,isroot=False,min_r=1e-3, min_mass=1e6):
+def getleaves(re,le,root,curroot,uid,hlist,mlist,merger_tree,snapstart=0,isroot=False,min_r=1e-3, min_mass=1e6):
     rooti = np.array(list(root['tree']))[root['tree','uid'] == uid][0]
     cmass = rooti['Mvir_all'].to('Msun').v.tolist()
     bool1 = rooti['prog','mass'].to('Msun') > min_mass
@@ -141,7 +143,7 @@ def getleaves(re,le,root,curroot,uid,hlist,mlist,merger_tree,sim_code,snapstart=
         hlist[curroot] = {}
         # Limits leaves to those above the mass limit.
         for leaf in np.array(list(rooti['prog']))[bool1]:
-            hlist = add_leaves(leaf,re,le,hlist,curroot,snapstart,sim_code=sim_code,min_r=min_r,min_mass=min_mass)
+            hlist = add_leaves(leaf,re,le,hlist,curroot,snapstart,min_r=min_r,min_mass=min_mass)
     # Find progenitor nodes with more than one progenitor
     bool2 = rooti['prog','num_prog'][bool1] >1
     branchn = 0
@@ -161,7 +163,7 @@ def getleaves(re,le,root,curroot,uid,hlist,mlist,merger_tree,sim_code,snapstart=
                 hlist['uids'] = np.append(hlist['uids'],int(corooti['tree','uid'][0]))
                 bool3 = corooti['prog','mass'].to('Msun') > min_mass
                 for leaf in np.array(list(corooti['prog']))[bool3]:
-                    hlist = add_leaves(leaf,re,le,hlist,curcon,snapstart,sim_code=sim_code,min_r=min_r,min_mass=min_mass)
+                    hlist = add_leaves(leaf,re,le,hlist,curcon,snapstart,min_r=min_r,min_mass=min_mass)
                 branchn += 1
     # Establishes that the progentors for this root have been found.
     # Any sub-sub branches are still un-solved.
@@ -181,10 +183,10 @@ rockfolder = 'rockstar_halos'
 
 #Setting the minimum radius and the minimum mass for the halos
 min_r = 5e-4
-min_mass = 1e7
+min_mass = 1e6
 
 #Building the merger history
-hlist,masses = makehlist(folder,rockfolder,trees,sim_code=sim_code,depth=7,min_r=min_r,min_mass=min_mass)
+hlist,masses = makehlist(folder,rockfolder,trees,depth=7,min_r=min_r,min_mass=min_mass)
 #Writing out the output
 if yt.is_root():
    np.save('%s/%s' % (folder,output_name),hlist)
