@@ -15,10 +15,22 @@ nprocs = comm.size
 #--------------------------------------------------------------------------------------------------------------------------------------------------
 #This part is re-structuring the data system to fit Thinh's analysis
 #Create yt filter for stars in general (Pop 2 + Pop 3)
-def stars(pfilter, data):
-     filter_stars = np.logical_and(data["all", "particle_type"] == 2, data["all", "particle_mass"].to('Msun') > 1)
+def pop2(pfilter, data):
+     filter_stars = np.logical_and(data["all", "particle_type"] == 7, data["all", "particle_mass"].to('Msun') > 1)
      return filter_stars
 
+def pop3(pfilter, data):
+     filter_stars = np.logical_and(data["all", "particle_type"] == 5, data["all", "particle_mass"].to('Msun') > 1)
+     return filter_stars
+
+def stars(pfilter, data):
+     filter_pop2 = np.logical_and(data["all", "particle_type"] == 7, data["all", "particle_mass"].to('Msun') > 1)
+     filter_pop3 = np.logical_and(data["all", "particle_type"] == 5, data["all", "particle_mass"].to('Msun') > 1)
+     filter_stars = np.logical_or(filter_pop2,filter_pop3)
+     return filter_stars
+
+add_particle_filter("pop2", function=pop2, filtered_type="all", requires=["particle_type","particle_mass"])
+add_particle_filter("pop3", function=pop3, filtered_type="all", requires=["particle_type","particle_mass"])
 add_particle_filter("stars", function=stars, filtered_type="all", requires=["particle_type","particle_mass"])
 
 def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
@@ -71,6 +83,10 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
     #Calculating total stellar mass
     sm_mass = reg["stars", "particle_mass"].in_units("Msun").sum().v.tolist()
 
+    #Calculating the Pop2 and Pop3 stellar mass
+    pop2_mass = reg["pop2", "particle_mass"].in_units("Msun").sum().v.tolist()
+    pop3_mass = reg["pop3", "particle_mass"].in_units("Msun").sum().v.tolist()
+
     #Get the mass and the formation time for each star particle in the halo
     s_mass_each = reg["stars", "particle_mass"].in_units("Msun")
     formation_time = reg["stars", "creation_time"].in_units("Gyr")
@@ -96,7 +112,7 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
     h2_fraction = np.average(h2_fraction_each,weights=g_mass_each)
 
     #Make a dictionary for the output
-    output_dict = {'tree_loc':tree_loc,'coor':coor,'Rvir':rvir,'redshift':redshift,'time':currenttime.v.tolist(),'gas_mass': g_mass, 'gas_mass_frac': g_mass_fraction,'dm_mass': dm_mass, 'star_mass': sm_mass,'metal_mass': metal_mass, 'metallicity': metallicity,'sfr': sfr, 'total_mass':mvir,'h2_mass':h2_mass,'h2_fraction':h2_fraction}
+    output_dict = {'tree_loc':tree_loc,'coor':coor,'Rvir':rvir,'redshift':redshift,'time':currenttime.v.tolist(),'gas_mass': g_mass, 'gas_mass_frac': g_mass_fraction,'dm_mass': dm_mass, 'star_mass': sm_mass,'pop2_mass': pop2_mass,'pop3_mass':pop3_mass ,'metal_mass': metal_mass, 'metallicity': metallicity,'sfr': sfr, 'total_mass':mvir,'h2_mass':h2_mass,'h2_fraction':h2_fraction}
 
     return output_dict
 
@@ -152,3 +168,20 @@ def add_additional_properties_Thinh(folder, hlist):
         halo_by_loc[j] = halos_each_loc
 
     return halo_by_loc
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+#Main code
+
+#The directory to the folder containing the simulation snapshots
+folder = sys.argv[-1]
+#The name of the halotree file
+tree_name = 'halotree.npy'
+
+output_name_Thinh = 'halotree_Thinh_structure.npy'
+
+#Reload the merger history
+hlist = np.load('%s/%s' % (folder,tree_name),allow_pickle=True).tolist()
+#Adding more properties to the merger history
+hlist_Thinh = add_additional_properties_Thinh(folder, hlist)
+if yt.is_root():
+    np.save('%s/%s' % (folder,output_name_Thinh),hlist_Thinh)
