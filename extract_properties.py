@@ -53,8 +53,8 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
 
     #Load the coordinates and radius of the halo (they are already in code_length unit)
     coor = halo[0]
-    rvir = halo[2]
-    tree_loc = halo[4]
+    rvir = halo[1]
+    tree_loc = halo[2]
     
     #Get the redshift of the snapshot
     redshift = sim_data.current_redshift
@@ -79,6 +79,8 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
 
     #Create the star-type filter to make it easier to extract the creation time for the SFR calculation
     sim_data.add_particle_filter("stars")
+    sim_data.add_particle_filter("pop2")
+    sim_data.add_particle_filter("pop3")
 
     #Calculating total stellar mass
     sm_mass = reg["stars", "particle_mass"].in_units("Msun").sum().v.tolist()
@@ -175,7 +177,7 @@ def add_additional_properties_Thinh(folder, hlist):
 #The directory to the folder containing the simulation snapshots
 folder = sys.argv[-1]
 #The name of the halotree file
-tree_name = 'halotree.npy'
+tree_name = 'halotree_trees0to5.npy'
 
 output_name_Thinh = 'halotree_Thinh_structure.npy'
 
