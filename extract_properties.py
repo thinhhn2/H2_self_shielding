@@ -111,7 +111,7 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
     
     #Calculate the weighted H2_fraction (the weight is the gas mass)
     h2_fraction_each = reg[("gas","H2_fraction")]
-    h2_fraction = np.average(h2_fraction_each,weights=g_mass_each)
+    h2_fraction = np.average(h2_fraction_each,weights=g_mass_each).v.tolist()
 
     #Make a dictionary for the output
     output_dict = {'tree_loc':tree_loc,'coor':coor,'Rvir':rvir,'redshift':redshift,'time':currenttime.v.tolist(),'gas_mass': g_mass, 'gas_mass_frac': g_mass_fraction,'dm_mass': dm_mass, 'star_mass': sm_mass,'pop2_mass': pop2_mass,'pop3_mass':pop3_mass ,'metal_mass': metal_mass, 'metallicity': metallicity,'sfr': sfr, 'total_mass':mvir,'h2_mass':h2_mass,'h2_fraction':h2_fraction}
