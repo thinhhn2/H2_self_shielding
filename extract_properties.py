@@ -119,7 +119,7 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
     return output_dict
 
 def add_additional_properties_Thinh(folder, hlist):
-    gs = np.loadtxt('%s/pfs.dat' % folder,dtype=str)
+    gs = np.loadtxt('%s/pfs_manual.dat' % folder,dtype=str)
     #This represents the redshift. The index corresponds to the index in the pfs.dat file
     z_index = np.arange(0,len(gs),1)
 

@@ -11,6 +11,94 @@ comm = MPI.COMM_WORLD
 rank = comm.rank
 nprocs = comm.size
 
+def make_pfs(folder, rockfolder):
+    """
+    This function creates the pfs.dat file by matching the redshifts in the rockstar
+    outputs to the redshifts in the simulation snapshots. This is used when we don't
+    know what snapshot each rockstar output refers to because the pfs.dat file is
+    missing. This is especially useful if the number of snapshots and the number
+    of rockstar outputs are not the same.
+
+
+    Parameters
+    ----------
+    folder : str
+        The directory to the folder containing the simulation snapshots.
+    rockfolder : str
+        The name of the folder containing rockstar outputs.
+
+    Returns
+    -------
+    None.
+
+    """
+    if yt.is_root():
+        cwd = os.getcwd()
+        
+        #Obtaining the redshifts of all the rockstar outputs from the scales.txt file.
+        #This file is produced when consistent-tree is run. Loading the redshifts this way 
+        #ensures the pfs.dat snapshots matches with the tree_0_0_0.dat snapshots (because 
+        #sometimes, consistent-tree removes rockstar outputs when there aren't enough halos
+        #in that snapshot)
+        rockstar_files = '%s/%s/outputs/scales.txt' % (folder, rockfolder)
+        
+        #Create a dictionary to store the redshifts of all the rockstar outputs and the output's directory
+        rockstar_redshifts = []
+
+        #Loop through each output. The scale factor is the number after the '#a =' string in the
+        #output text file
+        with open(rockstar_files, 'r') as file:
+            for line in file:
+                scale = float(line.split()[-1])
+                redshift = 1/scale - 1
+                rockstar_redshifts.append(redshift)
+        
+        #Change the directory to where the snapshots are located
+        os.chdir('%s' % folder)
+        
+        #Obtaining the directory to all the snapshot configuration files
+        bases = [["DD", "output_"],
+                 ["DD", "data"],
+                 ["DD", "DD"],
+                 ["RD", "RedshiftOutput"],
+                 ["RD", "RD"],
+                 ["RS", "restart"]]
+        snapshot_files = []
+        for b in bases:
+            snapshot_files += glob.glob("%s????/%s????" % (b[0], b[1]))
+                
+
+        #Create a dictionary to store the redshifts of all the snapshots and the snapshot's directory
+        snapshot_redshifts = {}
+
+        #Loop through each output. The scale factor is the number after the '#a =' string in the
+        #output text file
+        for file_dir in snapshot_files:
+            with open(file_dir, 'r') as file:
+                for line in file:
+                    if line.startswith('CosmologyCurrentRedshift'):
+                        redshift = float(line.split()[-1])
+                        break
+            snapshot_redshifts[file_dir] = redshift
+            
+
+        #Match the rockstar redshift to closest value in the snapshot redshift to write a pfs.dat file
+        pfs_output = []
+        for vals in rockstar_redshifts:
+            index = np.argmin(abs(vals - np.array(list(snapshot_redshifts.values()))))
+            #Obtain the directory to the snapshot whose redshift is the closest match
+            snapshot_dir = list(snapshot_redshifts.keys())[index]
+            pfs_output.append(snapshot_dir)
+
+        #Write out a pfs.dat file
+        with open('pfs_manual.dat','w') as file:
+            for item in pfs_output:
+                file.write("%s\n" % item)
+
+        #Change back to the original working directory
+        os.chdir(cwd)
+
+
 def makehlist(folder,rockfolder,numtrees,depth=5,min_r=1e-3,min_mass=1e6):
     #Get the current working directory (where the output will be located) to easily switch back later
     cdw = os.getcwd()
@@ -180,6 +268,17 @@ output_name = 'halotree.npy'
 folder = sys.argv[-1]
 #The name of the folder containing rockstar outputs
 rockfolder = 'rockstar_halos'
+
+#Make pfs_manual.dat file from the rockstar_halos/outputs/scales.txt file (regardless whether
+#we have the original pfs.dat or not). 
+#This is VERY IMPORTANT because consistent-tree may not use all the rockstar outputs
+#because not all of them have halos. Therefore, consistent-tree will follow the index (via Snap_idx)
+#from the rockstar_halos/outputs/scales.txt file. Thus, we need to create the pfs_manual.dat
+#file so we can match the consistent-tree indices with the snapshot correctly when extracting
+#the snapshot properties.
+if yt.is_root():
+  if os.path.exists('%s/pfs_manual.dat' % folder) == False:
+    make_pfs(folder,rockfolder)
 
 #Setting the minimum radius and the minimum mass for the halos
 min_r = 5e-4
