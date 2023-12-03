@@ -210,6 +210,7 @@ def add_leaves(leaf,re,le,hlist,curroot,snapstart,min_r=1e-3, min_mass = 1e6):
         hlist[curroot][snap] = []
         hlist[curroot][snap].append([x,y,z])
         hlist[curroot][snap].append(rvir)
+        hlist[curroot][snap].append(cmass)
     return hlist
 
 
