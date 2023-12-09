@@ -54,7 +54,7 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.005):
     #Load the coordinates and radius of the halo (they are already in code_length unit)
     coor = halo[0]
     rvir = halo[1]
-    tree_loc = halo[2]
+    tree_loc = halo[3]
     
     #Get the redshift of the snapshot
     redshift = sim_data.current_redshift
