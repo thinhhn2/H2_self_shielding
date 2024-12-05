@@ -84,7 +84,10 @@ def calculate_properties_Thinh(halo, sim_data, sfr_avetime = 0.01):
     #Calculate the mvir total mass from yt
     mvir = pmass_each.sum().v.tolist() + g_mass
     #Calculate the gas mass fraction
-    g_mass_fraction = g_mass/mvir
+    if mvir != 0:
+        g_mass_fraction = g_mass/mvir
+    else:
+        g_mass_fraction = np.nan
     #Make a dictionary for the output
     output_dict = {'tree_loc':tree_loc,'coor':coor,'Rvir':rvir,'redshift':redshift,'time':currenttime.v.tolist(),
                    'gas_mass': g_mass, 'gas_mass_frac': g_mass_fraction, 'h2_mass': h2_mass, 'h2_fraction': h2_fraction,
