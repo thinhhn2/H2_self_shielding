@@ -248,11 +248,12 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
             age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             output_final[idx][branch]['total_mass'] = np.sum(mass)
             output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
+    return output_final
             
 if __name__ == "__main__":
     rawtree = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/halotree_1088_final.npy', allow_pickle=True).tolist()
     tree = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/halotree_1088_final_Thinh_structure.npy', allow_pickle=True).tolist()
     pfs = np.loadtxt('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/pfs_allsnaps_1088.txt', dtype=str).tolist()
     metadata_dir = '/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/star_metadata'
-    stars_assign_output = stars_assignment(rawtree, tree, pfs, metadata_dir)
+    stars_assign_output = stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = False)
     np.save('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/stars_assignment.npy', stars_assign_output)
