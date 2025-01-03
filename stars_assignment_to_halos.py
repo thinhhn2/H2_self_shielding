@@ -57,7 +57,31 @@ def find_total_E(star_pos, star_vel, ds, tree, branch, idx):
     return E
 
 
-def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True)
+def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
+    """
+    This function uniquely assigns each star in the simulation box to a halo. 
+    ---
+    Input
+    ---
+    rawtree: 
+      the SHINBAD merger tree output
+    tree: 
+      Thinh's reformatted version of the SHINBAD merger tree output
+    pfs: 
+      the list of the snapshot's directory
+    metadata_dir: 
+      the directory to the file containing the star's metadata
+    ---
+    Output
+    ---
+    output_final: 
+      a dictionary containing the halos with the ID of their stars. The keys of the dictionary are the Snapshot indices.
+      Each snapshot index is another dictary whose keys are the branches with stars, the SFR, and the total stellar mass.
+    """
+    output = {}
+    for idx in ray_tree['0'].keys():
+        output[str(idx)] = {}
+    #---
     for idx in tqdm(tree['0'].keys()):
         idx = str(idx)
         #
@@ -145,3 +169,35 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True)
             print('Halo with stars:', halo_wstars_branch)
             print('Number of assingned stars in each halo:', len_starmap, '\n')
             #print(starmap_ID,'\n')
+    #------------------------------------------------------------------------
+    #This step removes the stars that moves outside of the halo's virial radius. The unique stellar mass and SFR is also calculated in this step. 
+    output_final = {}
+    for idx in output.keys():
+        output_final[idx] = {}
+        metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
+        pos_all = metadata['pos']
+        mass_all = metadata['mass']
+        age_all = metadata['age']
+        ID_all = np.array(np.load(metadata_dir + '/' + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
+        for branch in output[idx].keys():
+            ID = output[idx][branch]
+            pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            ID = ID_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            #
+            halo_center = ray_rawtree[branch][int(idx)]['Halo_Center']
+            halo_radius = ray_rawtree[branch][int(idx)]['Halo_Radius']
+            #
+            final_bool = np.linalg.norm(pos - halo_center, axis=1) < halo_radius
+            ID_final = ID[final_bool]
+            pos_final = pos[final_bool]
+            mass_final = mass[final_bool]
+            age_final = age[final_bool]
+            output_final[idx][branch] = {}
+            output_final[idx][branch]['ID'] = ID_final
+            output_final[idx][branch]['total_mass'] = np.sum(mass_final)
+            output_final[idx][branch]['sfr'] = np.sum(mass_final[age_final < 0.01])/1e7 #sfr is averaged on the timescale of 10 million years
+            
+if __name__ == "__main__":
+    rawtree = 
