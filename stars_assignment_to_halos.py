@@ -60,6 +60,9 @@ def find_total_E(star_pos, star_vel, ds, tree, branch, idx):
 def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
     """
     This function uniquely assigns each star in the simulation box to a halo. 
+    There are two steps:
+    + Step 1: Locate the halo where a star is born in. If a star is born in the intersection of multiple halos, perform energy calculation to see which halo that star belongs to. Assume that that star remains in that halo until the end of the simulation. If that halo is a sub-halo, add that star to the main halo when the two halos merge. This step helps speed up the star assignment process because we don't need to calculate the orbital energy of each star.
+    + Step 2: Re-evaluate the assumption and output from Step 1. If a star moves outside of the in-situ halo at a certain timestep (hereby called "loss star"), remove that star from that halo, and find whether that star is bound to another halo. This steps require enegy calculation for each loss star, but the number of loss stars is much smaller than the total number of stars.
     ---
     Input
     ---
@@ -170,8 +173,9 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
             print('Number of assingned stars in each halo:', len_starmap, '\n')
             #print(starmap_ID,'\n')
     #------------------------------------------------------------------------
-    #This step removes the stars that moves outside of the halo's virial radius. The unique stellar mass and SFR is also calculated in this step. 
-    output_final = {}
+    #This step removes the stars that moves outside of the halo's virial radius and addes them to another halos if needed. 
+    #The unique stellar mass and SFR is also calculated in this step. 
+    output_final = {} #the re-analyzed output
     for idx in output.keys():
         output_final[idx] = {}
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
@@ -179,25 +183,75 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
         mass_all = metadata['mass']
         age_all = metadata['age']
         ID_all = np.array(np.load(metadata_dir + '/' + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
+        if os.path.exists(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx) == True:
+            vel_all = np.array(np.load(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx, allow_pickle=True).tolist()['vel'])
+        else:
+            vel_all = np.empty(shape=(0,3))
         for branch in output[idx].keys():
             ID = output[idx][branch]
+            #obtain the stars found in the initial output
             pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             ID = ID_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
             halo_center = ray_rawtree[branch][int(idx)]['Halo_Center']
             halo_radius = ray_rawtree[branch][int(idx)]['Halo_Radius']
             #
-            final_bool = np.linalg.norm(pos - halo_center, axis=1) < halo_radius
-            ID_final = ID[final_bool]
-            pos_final = pos[final_bool]
-            mass_final = mass[final_bool]
-            age_final = age[final_bool]
+            #remain_bool: stars that still remain in the halo where they are born
+            #loss_bool: stars that move out of the halo where they were born 
+            remain_bool = np.linalg.norm(pos - halo_center, axis=1) < halo_radius
+            loss_bool = np.linalg.norm(pos - halo_center, axis=1) >= halo_radius
+            #------------------------
+            ID_remain = ID[_remain_bool]
+            pos_remain = pos[_remain_bool]
+            mass_remain = mass[_remain_bool]
+            age_remain = age[_remain_bool]
+            #--------------------------
             output_final[idx][branch] = {}
-            output_final[idx][branch]['ID'] = ID_final
-            output_final[idx][branch]['total_mass'] = np.sum(mass_final)
-            output_final[idx][branch]['sfr'] = np.sum(mass_final[age_final < 0.01])/1e7 #sfr is averaged on the timescale of 10 million years
+            output_final[idx][branch]['ID'] = ID_remain
+            #---------------------------
+            #Reassign the "loss" stars to new halos by using bound energy condition
+            ID_loss = ID[loss_bool]
+            pos_loss = pos[loss_bool]
+            vel_loss = vel[loss_bool]
+            if len(ID_loss) > 0:
+                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(ray_tree, idx) #obtain the list of halos with stars
+                halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
+                ds = yt.load(ray_pfs[int(idx)])
+                inside_branch_total = []
+                #loop through each loss star
+                for k in range(len(ID_loss)): 
+                    inside_branch = halo_wstars_branch[halo_boolean[k]] #these are the branches that the loss stars move to
+                    E_list = np.array([])
+                    for ibranch in inside_branch: #perform energy calculation to see which new halo those loss stars are bound to
+                        inside_branch_total.append(ibranch)
+                        E = find_total_E(pos_loss[k], vel_loss[k], ds, ray_rawtree, ibranch, int(idx))
+                        E_list = np.append(E_list, E)
+                    E_list = np.array(E_list)
+                    if (E_list < 0).any() == True: #if the star is bound to multiple halos, select the one with the most negative total energy
+                        bound_branch = inside_branch[np.argmin(E_list)]
+                        print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', bound_branch)
+                        if bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
+                            output_final[idx][bound_branch] = {}
+                            output_final[idx][bound_branch]['ID'] = np.array([ID_loss[k]])
+                        else:
+                            output_final[idx][bound_branch]['ID'] = np.append(output_final[idx][bound_branch]['ID'], ID_loss[k])
+                    else:
+                        continue #the star is not bound to any halo, skip this star            
+    #Finalize the output_final star ID and calculate the unique total stellar mass and SFR.
+    for idx in output_final.keys():
+        metadata = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/star_metadata/star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
+        mass_all = metadata['mass']
+        age_all = metadata['age']
+        ID_all = np.array(np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/star_metadata/star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
+        for branch in output_final[idx].keys():
+            ID = output_final[idx][branch]['ID']
+            mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            output_final[idx][branch]['total_mass'] = np.sum(mass)
+            output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
             
 if __name__ == "__main__":
     rawtree = 
