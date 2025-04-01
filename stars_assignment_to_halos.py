@@ -89,6 +89,7 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     output = {}
     for idx in range(0, len(pfs)):
         output[str(idx)] = {}
+
     #------------------------------------------------------------------------
     for idx in tqdm(range(0, len(pfs))):
         idx = str(idx)
@@ -110,7 +111,9 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         vel_unassign = vel_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         #Obtain the halos with stars
+        halo_wstars_map = {}
         halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, pos_all, idx)
+        halo_wstars_map[idx] = (halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch) #stored it for later used in Step 2 of the code
         #
         #The shape of halo_boolean is (X,Y), where X is the number of star particles and Y is the number of halos with stars
         halo_boolean = np.linalg.norm(pos_unassign[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
@@ -218,7 +221,7 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             pos_loss = pos[loss_bool]
             vel_loss = vel[loss_bool]
             if len(ID_loss) > 0:
-                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, idx) #obtain the list of halos with stars
+                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx] #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
                 ds = yt.load(pfs[int(idx)])
                 inside_branch_total = []
