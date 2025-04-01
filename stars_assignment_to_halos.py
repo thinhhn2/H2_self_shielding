@@ -9,6 +9,12 @@ def search_closest_upper(value, array):
     diff = array - value
     return np.where(diff >= 0)[0][0]
 
+def extract_and_order_snapshotIdx(rawtree, branch):
+    keys = list(rawtree[branch].keys())
+    snapshotIdx = [x for x in keys if not isinstance(x, str)]
+    snapshotIdx.sort()
+    return snapshotIdx
+
 def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_pos = np.empty(shape=(0,3))
     halo_wstars_rvir = np.array([])
@@ -58,7 +64,7 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     return E
 
 
-def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
+def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
     This function uniquely assigns each star in the simulation box to a halo. 
     There are two steps:
@@ -69,8 +75,6 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
     ---
     rawtree: 
       the SHINBAD merger tree output
-    tree: 
-      Thinh's reformatted version of the SHINBAD merger tree output
     pfs: 
       the list of the snapshot's directory
     metadata_dir: 
@@ -85,7 +89,7 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
     output = {}
     for idx in range(0, len(pfs)):
         output[str(idx)] = {}
-    #---
+    #------------------------------------------------------------------------
     for idx in tqdm(range(0, len(pfs))):
         idx = str(idx)
         #
@@ -142,7 +146,7 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
         #
         for i in range(len(halo_wstars_branch)):
             if len(starmap_ID[i]) > 0: 
-                for j in tree[halo_wstars_branch[i]].keys(): #assuming when a star forms inside a halo, it will not leave that halo 
+                for j in extract_and_order_snapshotIdx(rawtree, halo_wstars_branch[i]): #assuming when a star forms inside a halo, it will not leave that halo 
                     if int(j) >= int(idx):
                         if halo_wstars_branch[i] not in output[j].keys():
                             output[j][halo_wstars_branch[i]] = starmap_ID[i]
@@ -156,8 +160,8 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
                 for level in range(nlevels): #add the stars in the sub-branch to higher branches
                     deepest_lvl = loop_branch.split('_')[-1]
                     mainbranch = loop_branch.split('_' + deepest_lvl)[0]
-                    merge_timestep = np.max(np.array(list(tree[loop_branch].keys())).astype(int)) + 1
-                    last_timestep = np.max(np.array(list(tree[mainbranch].keys())).astype(int))
+                    merge_timestep = np.max(extract_and_order_snapshotIdx(rawtree, loop_branch)) + 1
+                    last_timestep = np.max(extract_and_order_snapshotIdx(rawtree, mainbranch))
                     for j in range(merge_timestep, last_timestep + 1):
                         if mainbranch not in output[str(j)].keys():
                             output[str(j)][mainbranch] = starmap_ID[i]
@@ -214,7 +218,7 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
             pos_loss = pos[loss_bool]
             vel_loss = vel[loss_bool]
             if len(ID_loss) > 0:
-                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(tree, idx) #obtain the list of halos with stars
+                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, idx) #obtain the list of halos with stars
                 halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
                 ds = yt.load(pfs[int(idx)])
                 inside_branch_total = []
@@ -253,8 +257,7 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
             
 if __name__ == "__main__":
     rawtree = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/halotree_1088_final.npy', allow_pickle=True).tolist()
-    tree = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/halotree_1088_final_Thinh_structure.npy', allow_pickle=True).tolist()
     pfs = np.loadtxt('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/pfs_allsnaps_1088.txt', dtype=str).tolist()
     metadata_dir = '/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/star_metadata'
-    stars_assign_output = stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = False)
+    stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = False)
     np.save('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/stars_assignment.npy', stars_assign_output)
