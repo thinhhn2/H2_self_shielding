@@ -9,15 +9,16 @@ def search_closest_upper(value, array):
     diff = array - value
     return np.where(diff >= 0)[0][0]
 
-def list_of_halos_wstars_idx(tree, idx):
+def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_pos = np.empty(shape=(0,3))
     halo_wstars_rvir = np.array([])
     halo_wstars_branch = np.array([])
-    for key, vals in tree.items():
-        if idx in vals.keys() and vals[idx]['star_mass'] > 1:
-            halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['coor']))
-            halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Rvir'])
-            halo_wstars_branch = np.append(halo_wstars_branch, key)   
+    for branch, vals in rawtree.items():
+        if idx in vals.keys():
+            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < rawtree[branch][idx]['Halo_Radius']).any():
+                halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center']))
+                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius'])
+                halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
 def univDen(ds):
@@ -29,26 +30,26 @@ def univDen(ds):
     den = (3*H/(8*np.pi*G)).to("kg/m**3") / u.kg * u.m**3
     return den.value
 
-def extract_char_radius(tree, branch, idx):
+def extract_char_radius(rawtree, branch, idx):
     oden_list = np.array([100, 150, 200, 250, 300, 500, 700])
     char_radius_list = np.array([])
     for oden in oden_list:
         key = 'r%s' % oden
-        char_radius_list = np.append(char_radius_list, tree[branch][idx][key])
+        char_radius_list = np.append(char_radius_list, rawtree[branch][idx][key])
     return oden_list, char_radius_list
 
-def find_total_E(star_pos, star_vel, ds, tree, branch, idx):
+def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #this function calculate the total orbital energy of a star around a halo
     #the unit of position is code_length and the unit of velocity is code_length/s
-    star_r_codelength = np.linalg.norm(star_pos - tree[branch][idx]['Halo_Center'])
+    star_r_codelength = np.linalg.norm(star_pos - rawtree[branch][idx]['Halo_Center'])
     star_r = (star_r_codelength*ds.units.code_length).to('m').v
     #
-    halo_vel = (tree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    halo_vel = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     star_relvel_mag = np.linalg.norm(star_vel - halo_vel)
     #Kinetic energy
     KE = 0.5*star_relvel_mag**2
     #Approximate M(r < star_r) by using the overdensity
-    oden_list, char_radius_list = extract_char_radius(tree, branch, idx)
+    oden_list, char_radius_list = extract_char_radius(rawtree, branch, idx)
     char_radius_list = (char_radius_list*ds.units.code_length).to('m').v
     oden = oden_list[char_radius_list > star_r][-1]
     M = (4/3)*np.pi*oden*univDen(ds)*star_r**3
@@ -82,10 +83,10 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
       Each snapshot index is another dictary whose keys are the branches with stars, the SFR, and the total stellar mass.
     """
     output = {}
-    for idx in tree['0'].keys():
+    for idx in range(0, len(pfs)):
         output[str(idx)] = {}
     #---
-    for idx in tqdm(tree['0'].keys()):
+    for idx in tqdm(range(0, len(pfs))):
         idx = str(idx)
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
@@ -98,14 +99,14 @@ def stars_assignment(rawtree, tree, pfs, metadata_dir, print_mode = True):
         else:
             vel_all = np.empty(shape=(0,3))
         #
-        if idx == list(tree['0'].keys())[0]:
+        if idx == 0:
             ID_all_prev = np.array([])
         #
         ID_unassign = np.setdiff1d(ID_all, ID_all_prev)
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         vel_unassign = vel_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         #Obtain the halos with stars
-        halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(tree, idx)
+        halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, pos_all, idx)
         #
         #The shape of halo_boolean is (X,Y), where X is the number of star particles and Y is the number of halos with stars
         halo_boolean = np.linalg.norm(pos_unassign[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
