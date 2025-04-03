@@ -4,6 +4,7 @@ from astropy.constants import G
 import astropy.units as u
 from tqdm import tqdm
 import os
+import glob as glob
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -71,7 +72,23 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     E = KE + PE
     return E
 
-def extract_star_metadata(pfs, idx, numsegs,savedir):
+def region_number(idx, halodir):
+    #this function find the refined region that will be used for a given snapshot
+    lenregion = len(halodir + '/' + 'refined_region_')
+    regions = glob.glob(halodir + '/' + 'refined_region_*.npy')
+    region_list = []
+    for region in regions:
+        region_list.append(int(region[lenregion:-4]))
+    region_list.sort()
+    region_list = np.array(region_list)
+    region_idx = region_list[region_list >= idx].min()
+    return region_idx
+
+def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
+    #load the refined region, we assume that stars only exist in this region
+    region_idx = region_number(idx, halodir)
+    refined_region = np.load(halodir + '/' + 'refined_region_%s.npy' % region_idx, allow_pickle=True).tolist()
+    #
     ds = yt.load(pfs[idx])
     ll_all = ds.domain_left_edge.to('code_length').v
     ur_all = ds.domain_right_edge.to('code_length').v
