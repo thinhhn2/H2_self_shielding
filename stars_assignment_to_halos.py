@@ -64,6 +64,53 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     E = KE + PE
     return E
 
+def extract_star_metadata(pfs, idx):
+    ds = yt.load(pfs[idx])
+    ll_all = ds.domain_left_edge.to('code_length').v
+    ur_all = ds.domain_right_edge.to('code_length').v
+    xx,yy,zz = np.meshgrid(np.linspace(ll_all[0],ur_all[0],numsegs),\
+                np.linspace(ll_all[1],ur_all[1],numsegs),np.linspace(ll_all[2],ur_all[2],numsegs))
+
+    _,segdist = np.linspace(ll_all[0],ur_all[0],numsegs,retstep=True)
+
+    ll = np.concatenate((xx[:-1,:-1,:-1,np.newaxis],yy[:-1,:-1,:-1,np.newaxis],zz[:-1,:-1,:-1,np.newaxis]),axis=3) #ll is lowerleft
+    ur = np.concatenate((xx[1:,1:,1:,np.newaxis],yy[1:,1:,1:,np.newaxis],zz[1:,1:,1:,np.newaxis]),axis=3) #ur is upperright
+    ll = np.reshape(ll,(ll.shape[0]*ll.shape[1]*ll.shape[2],3))
+    ur = np.reshape(ur,(ur.shape[0]*ur.shape[1]*ur.shape[2],3))
+    #Runnning parallel to load the star information
+    my_storage = {}
+    for sto, i in yt.parallel_objects(range(len(ll)), nprocs, storage = my_storage, dynamic = False):
+        reg = ds.box(ll[i] ,ur[i])
+        ptype = reg['all', 'particle_type'].v
+        pmass = reg['all', 'particle_mass'].to('Msun').v
+        ppos = reg['all', 'particle_position'].to('code_length').v
+        pvel = reg['all', 'particle_velocity'].to('km/s').v
+        pftime = reg['all','creation_time'].to('Gyr').v
+        page = reg['all','age'].to('Gyr').v
+        pmet = reg['all','metallicity_fraction'].to('Zsun').v
+        pID = reg['all','particle_index'].v
+        #
+        star_bool = np.logical_and(np.logical_or(ptype == 5, ptype == 7), pmass > 1)
+        star_mass = pmass[star_bool]
+        star_pos = ppos[star_bool]
+        star_vel = pvel[star_bool]
+        star_ftime = pftime[star_bool]
+        star_age = page[star_bool]
+        star_met = pmet[star_bool]
+        star_ID = pID[star_bool]
+        #Export the output
+        output = {}
+        output['mass'] = star_mass
+        output['pos'] = star_pos
+        output['vel'] = star_vel
+        output['ftime'] = star_ftime
+        output['age'] = star_age
+        output['met'] = star_met
+        output['ID'] = star_ID
+        print('Snapshot Idx %s is finished' % idx)
+        np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata/star_metadata_allbox_'+str(idx)+'.npy', output)
+        del ds, reg, ptype, pmass, ppos, page, pmet, pID, pvel, pftime,  star_bool, star_mass, star_pos, star_age, star_met, star_ID, star_vel, star_ftime, output
+
 
 def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
