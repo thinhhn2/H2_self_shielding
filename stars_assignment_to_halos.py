@@ -5,6 +5,13 @@ import astropy.units as u
 from tqdm import tqdm
 import os
 
+yt.enable_parallelism()
+from mpi4py import MPI
+comm = MPI.COMM_WORLD
+rank = comm.rank
+nprocs = comm.size
+
+
 def search_closest_upper(value, array):
     diff = array - value
     return np.where(diff >= 0)[0][0]
@@ -64,7 +71,7 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     E = KE + PE
     return E
 
-def extract_star_metadata(pfs, idx):
+def extract_star_metadata(pfs, idx, numsegs,savedir):
     ds = yt.load(pfs[idx])
     ll_all = ds.domain_left_edge.to('code_length').v
     ur_all = ds.domain_right_edge.to('code_length').v
@@ -85,32 +92,30 @@ def extract_star_metadata(pfs, idx):
         pmass = reg['all', 'particle_mass'].to('Msun').v
         ppos = reg['all', 'particle_position'].to('code_length').v
         pvel = reg['all', 'particle_velocity'].to('km/s').v
-        pftime = reg['all','creation_time'].to('Gyr').v
         page = reg['all','age'].to('Gyr').v
         pmet = reg['all','metallicity_fraction'].to('Zsun').v
         pID = reg['all','particle_index'].v
         #
         star_bool = np.logical_and(np.logical_or(ptype == 5, ptype == 7), pmass > 1)
-        star_mass = pmass[star_bool]
-        star_pos = ppos[star_bool]
-        star_vel = pvel[star_bool]
-        star_ftime = pftime[star_bool]
-        star_age = page[star_bool]
-        star_met = pmet[star_bool]
-        star_ID = pID[star_bool]
-        #Export the output
-        output = {}
-        output['mass'] = star_mass
-        output['pos'] = star_pos
-        output['vel'] = star_vel
-        output['ftime'] = star_ftime
-        output['age'] = star_age
-        output['met'] = star_met
-        output['ID'] = star_ID
-        print('Snapshot Idx %s is finished' % idx)
-        np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata/star_metadata_allbox_'+str(idx)+'.npy', output)
-        del ds, reg, ptype, pmass, ppos, page, pmet, pID, pvel, pftime,  star_bool, star_mass, star_pos, star_age, star_met, star_ID, star_vel, star_ftime, output
-
+        sto.result = {}
+        sto.result['type'] = ptype[star_bool]
+        sto.result['mass'] = pmass[star_bool]
+        sto.result['pos'] = ppos[star_bool]
+        sto.result['vel'] = pvel[star_bool]
+        sto.result['age'] = page[star_bool]
+        sto.result['met'] = pmet[star_bool]
+        sto.result['ID'] = pID[star_bool]
+    #
+    output = {}
+    infos = ['type', 'mass', 'pos', 'vel', 'age', 'met', 'ID']
+    for info in infos:
+        output[info] = np.array([])
+    #Go through different cores/regions to load the stars info to the output
+    for c, vals in sorted(my_storage.items()):
+        for info in infos:
+            output[info] = np.append(output[info], vals[info])
+    print('Snapshot Idx %s is finished' % idx)
+    np.save(savedir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
 
 def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
@@ -312,6 +317,10 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     return output_final
             
 if __name__ == "__main__":
+    if nprocs < 128:
+        numsegs = 10
+    else:
+        numsegs = int(np.ceil((nprocs*5)**(1/3)) + 1)
     rawtree = np.load('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/halotree_1088_final.npy', allow_pickle=True).tolist()
     pfs = np.loadtxt('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/pfs_allsnaps_1088.txt', dtype=str)[:,0]
     metadata_dir = '/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata'
