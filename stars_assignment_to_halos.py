@@ -114,8 +114,10 @@ def extract_star_metadata(pfs, idx, numsegs,savedir):
     for c, vals in sorted(my_storage.items()):
         for info in infos:
             output[info] = np.append(output[info], vals[info])
-    print('Snapshot Idx %s is finished' % idx)
-    np.save(savedir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
+    if yt.is_root():
+        print('Star metadata in Snapshot Idx %s is extracted' % idx)
+        np.save(savedir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
+    return output
 
 def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
