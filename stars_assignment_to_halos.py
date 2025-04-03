@@ -10,6 +10,7 @@ def search_closest_upper(value, array):
     return np.where(diff >= 0)[0][0]
 
 def extract_and_order_snapshotIdx(rawtree, branch):
+    #this function extract only the snapshot key (i.e. the integer value) from the rawtree halotree output
     keys = list(rawtree[branch].keys())
     snapshotIdx = [x for x in keys if not isinstance(x, str)]
     snapshotIdx.sort()
@@ -144,7 +145,6 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
                     E = find_total_E(pos_overlap[k], vel_overlap[k], ds, rawtree, branch, idx)
                     E_list = np.append(E_list, E)
                 bound_branch = overlap_branch[np.argmin(E_list)] #in this step, we don't check whether the total energy of each star is negative, so we also don't check it here. 
-                #(np.min(E_list))
                 starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k])
             print('OVERLAP DETECTED AT BRANCHES', set(overlap_branch_total))
         len_starmap = [len(i) for i in starmap_ID]
@@ -181,7 +181,6 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             print('Number of overlapped stars is', len(ID_overlap), ', Number of independent stars is', len(ID_indp))
             print('Halo with stars:', halo_wstars_branch)
             print('Number of assingned stars in each halo:', len_starmap, '\n')
-            #print(starmap_ID,'\n')
     #------------------------------------------------------------------------
     #This step removes the stars that moves outside of the halo's virial radius and addes them to another halos if needed. 
     #The unique stellar mass and SFR is also calculated in this step. 
@@ -266,8 +265,8 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     return output_final
             
 if __name__ == "__main__":
-    rawtree = np.load('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/halotree_1088_final.npy', allow_pickle=True).tolist()
-    pfs = np.loadtxt('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/pfs_allsnaps_1088.txt', dtype=str).tolist()
-    metadata_dir = '/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/star_metadata'
-    stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = False)
-    np.save('/work/hdd/bbvl/gtg115x/new_zoom_5/box_2_z_1/stars_assignment.npy', stars_assign_output)
+    rawtree = np.load('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/halotree_1088_final.npy', allow_pickle=True).tolist()
+    pfs = np.loadtxt('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/pfs_allsnaps_1088.txt', dtype=str)[:,0]
+    metadata_dir = '/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata'
+    stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = True)
+    np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment.npy', stars_assign_output)
