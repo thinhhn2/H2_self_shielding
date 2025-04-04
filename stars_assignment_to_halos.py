@@ -90,8 +90,8 @@ def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
     refined_region = np.load(halodir + '/' + 'refined_region_%s.npy' % region_idx, allow_pickle=True).tolist()
     #
     ds = yt.load(pfs[idx])
-    ll_all = ds.domain_left_edge.to('code_length').v
-    ur_all = ds.domain_right_edge.to('code_length').v
+    ll_all = np.array(refined_region[0])
+    ur_all = np.array(refined_region[1])
     xx,yy,zz = np.meshgrid(np.linspace(ll_all[0],ur_all[0],numsegs),\
                 np.linspace(ll_all[1],ur_all[1],numsegs),np.linspace(ll_all[2],ur_all[2],numsegs))
 
@@ -104,7 +104,8 @@ def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
     #Runnning parallel to load the star information
     my_storage = {}
     for sto, i in yt.parallel_objects(range(len(ll)), nprocs, storage = my_storage, dynamic = False):
-        reg = ds.box(ll[i] ,ur[i])
+        buffer = (segdist/200) #set buffer when loading the box
+        reg = ds.box(ll[i] - buffer ,ur[i] + buffer)
         ptype = reg['all', 'particle_type'].v
         pmass = reg['all', 'particle_mass'].to('Msun').v
         ppos = reg['all', 'particle_position'].to('code_length').v
@@ -131,7 +132,13 @@ def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
     for c, vals in sorted(my_storage.items()):
         for info in infos:
             output[info] = np.append(output[info], vals[info])
+    #Because there is a buffer region, we use np.unique to remove the duplicated stars
     if yt.is_root():
+        print('Before removing duplicates, the number of stars is:', len(output['ID']))
+        unique_idx = np.unique(output['ID'], return_index=True)[1]
+        for info in infos:
+            output[info] = output[info][unique_idx]
+        print('After removing duplicates, the number of stars is:', len(output['ID']))
         print('Star metadata in Snapshot Idx %s is extracted' % idx)
         np.save(savedir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
     return output
