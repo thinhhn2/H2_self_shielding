@@ -382,8 +382,19 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             output_final[idx][branch]['age3'] = age3
             output_final[idx][branch]['mets3'] = mets3
             output_final[idx][branch]['positions3'] = positions3
-
     return output_final
+
+def branch_first_rearrange(output_final):
+    output_re = {}
+    for snapshot in output_final.keys():
+        for branch in output_final[snapshot].keys():
+            if branch not in output_re.keys():
+                output_re[branch] = {}
+                output_re[branch][snapshot] = output_final[snapshot][branch]
+            else:
+                output_re[branch][snapshot] = output_final[snapshot][branch]
+    return output_re
+
             
 if __name__ == "__main__":
     if nprocs < 128:
@@ -395,4 +406,10 @@ if __name__ == "__main__":
     halo_dir = '/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp'
     metadata_dir = '/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata'
     stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
-    np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment.npy', stars_assign_output)
+    np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment_snapFirst.npy', stars_assign_output)
+    #
+    #This is to re-arange the data structure to match with Kirk's pipeline
+    branch_first = True
+    if branch_first == True:
+        stars_assign_output_re = branch_first_rearrange(stars_assign_output)
+        np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment_branchFirst.npy', stars_assign_output_re)
