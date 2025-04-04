@@ -282,6 +282,9 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
     output_final = {} #the re-analyzed output
     for idx in output.keys():
         output_final[idx] = {}
+        ds = yt.load(pfs[idx])
+        length_unit_pc = ds.domain_right_edge[0].to('pc').v.tolist()
+        #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
         mass_all = metadata['mass']
@@ -313,6 +316,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             ID_remain = ID[remain_bool]
             output_final[idx][branch] = {}
             output_final[idx][branch]['ID'] = ID_remain
+            output_final[idx][branch]['length_unit_pc'] = length_unit_pc
             #---------------------------
             #Reassign the "loss" stars to new halos by using bound energy condition
             ID_loss = ID[loss_bool]
@@ -321,7 +325,6 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             if len(ID_loss) > 0:
                 halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx] #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
-                ds = yt.load(pfs[idx])
                 inside_branch_total = []
                 #loop through each loss star
                 for k in range(len(ID_loss)): 
@@ -348,13 +351,38 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         mass_all = metadata['mass']
         age_all = metadata['age']
         ID_all = metadata['ID']
+        type_all = metadata['type']
+        mets_all = metadata['met']
+        pos_all = metadata['pos']
         #ID_all = np.array(np.load(metadata_dir + '/' + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
         for branch in output_final[idx].keys():
             ID = output_final[idx][branch]['ID']
             mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            type = type_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            mets = mets_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            #
+            mass2 = mass[type == 7]
+            age2 = age[type == 7]
+            mets2 = mets[type == 7]
+            positions2 = pos[type == 7]
+            mass3 = mass[type == 5]
+            age3 = age[type == 5]
+            mets3 = mets[type == 5]
+            positions3 = pos[type == 5]
+            #
             output_final[idx][branch]['total_mass'] = np.sum(mass)
             output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
+            output_final[idx][branch]['mass2'] = mass2
+            output_final[idx][branch]['age2'] = age2
+            output_final[idx][branch]['mets2'] = mets2
+            output_final[idx][branch]['positions2'] = positions2
+            output_final[idx][branch]['mass3'] = mass3
+            output_final[idx][branch]['age3'] = age3
+            output_final[idx][branch]['mets3'] = mets3
+            output_final[idx][branch]['positions3'] = positions3
+
     return output_final
             
 if __name__ == "__main__":
