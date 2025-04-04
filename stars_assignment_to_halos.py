@@ -127,11 +127,17 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
     output = {}
     infos = ['type', 'mass', 'pos', 'vel', 'age', 'met', 'ID']
     for info in infos:
-        output[info] = np.array([])
+        if info == 'pos':
+            output[info] = np.empty(shape=(0,3))
+        else:
+            output[info] = np.array([])
     #Go through different cores/regions to load the stars info to the output
     for c, vals in sorted(my_storage.items()):
         for info in infos:
-            output[info] = np.append(output[info], vals[info])
+            if info == 'pos':
+                output[info] = np.vstack((output[info], vals[info]))
+            else:
+                output[info] = np.append(output[info], vals[info])
     #Because there is a buffer region, we use np.unique to remove the duplicated stars
     if yt.is_root():
         print('Before removing duplicates, the number of stars is:', len(output['ID']))
