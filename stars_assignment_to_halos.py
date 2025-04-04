@@ -72,10 +72,10 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     E = KE + PE
     return E
 
-def region_number(idx, halodir):
+def region_number(idx, halo_dir):
     #this function find the refined region that will be used for a given snapshot
-    lenregion = len(halodir + '/' + 'refined_region_')
-    regions = glob.glob(halodir + '/' + 'refined_region_*.npy')
+    lenregion = len(halo_dir + '/' + 'refined_region_')
+    regions = glob.glob(halo_dir + '/' + 'refined_region_*.npy')
     region_list = []
     for region in regions:
         region_list.append(int(region[lenregion:-4]))
@@ -84,10 +84,10 @@ def region_number(idx, halodir):
     region_idx = region_list[region_list >= idx].min()
     return region_idx
 
-def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
+def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
     #load the refined region, we assume that stars only exist in this region
-    region_idx = region_number(idx, halodir)
-    refined_region = np.load(halodir + '/' + 'refined_region_%s.npy' % region_idx, allow_pickle=True).tolist()
+    region_idx = region_number(idx, halo_dir)
+    refined_region = np.load(halo_dir + '/' + 'refined_region_%s.npy' % region_idx, allow_pickle=True).tolist()
     #
     ds = yt.load(pfs[idx])
     ll_all = np.array(refined_region[0])
@@ -140,10 +140,10 @@ def extract_star_metadata(pfs, idx, numsegs, halodir, savedir):
             output[info] = output[info][unique_idx]
         print('After removing duplicates, the number of stars is:', len(output['ID']))
         print('Star metadata in Snapshot Idx %s is extracted' % idx)
-        np.save(savedir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
+        np.save(metadata_dir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
     return output
 
-def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
+def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True):
     """
     This function uniquely assigns each star in the simulation box to a halo. 
     There are two steps:
@@ -156,8 +156,14 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
       the SHINBAD merger tree output
     pfs: 
       the list of the snapshot's directory
+    halo_dir:
+        the directory to the halo finding and the refined region output
     metadata_dir: 
       the directory to the file containing the star's metadata
+    numsegs:
+        the number of segments to divide the box into. This is used if the star metadata needs to be extracted
+    print_mode:
+        whether to print the output of the function (for debugging purpose)
     ---
     Output
     ---
@@ -173,7 +179,10 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     #------------------------------------------------------------------------
     for idx in tqdm(range(0, len(pfs))):
         #
-        metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
+        if os.path.exists(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx) == False:
+            metadata = extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
+        else:
+            metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
         age_all = metadata['age']
         mass_all = metadata['mass']
@@ -349,6 +358,7 @@ if __name__ == "__main__":
         numsegs = int(np.ceil((nprocs*5)**(1/3)) + 1)
     rawtree = np.load('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/halotree_1088_final.npy', allow_pickle=True).tolist()
     pfs = np.loadtxt('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/pfs_allsnaps_1088.txt', dtype=str)[:,0]
+    halo_dir = '/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp'
     metadata_dir = '/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata'
-    stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = True)
+    stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
     np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment.npy', stars_assign_output)
