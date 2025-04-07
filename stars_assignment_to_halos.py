@@ -410,3 +410,7 @@ if __name__ == "__main__":
     if branch_first == True:
         stars_assign_output_re = branch_first_rearrange(stars_assign_output)
         np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment_branchFirst.npy', stars_assign_output_re)
+    #Delete the temporary star_metadata_allbox files
+    rm_files = glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy')
+    for file in rm_files:
+        os.remove(file)
