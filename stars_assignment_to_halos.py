@@ -364,10 +364,12 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             age2 = age[type == 7]
             mets2 = mets[type == 7]
             positions2 = pos[type == 7]
+            id2 = ID[type == 7]
             mass3 = mass[type == 5]
             age3 = age[type == 5]
             mets3 = mets[type == 5]
             positions3 = pos[type == 5]
+            id3 = ID[type == 5]
             #
             output_final[idx][branch]['total_mass'] = np.sum(mass)
             output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
@@ -375,10 +377,12 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             output_final[idx][branch]['age2'] = age2
             output_final[idx][branch]['mets2'] = mets2
             output_final[idx][branch]['positions2'] = positions2
+            output_final[idx][branch]['id2'] = id2
             output_final[idx][branch]['mass3'] = mass3
             output_final[idx][branch]['age3'] = age3
             output_final[idx][branch]['mets3'] = mets3
             output_final[idx][branch]['positions3'] = positions3
+            output_final[idx][branch]['id3'] = id3
     return output_final
 
 def branch_first_rearrange(output_final):
