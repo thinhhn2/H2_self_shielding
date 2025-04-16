@@ -8,6 +8,10 @@ import astropy.units as u
 from tqdm import tqdm
 import os
 import glob as glob
+from scipy.interpolate import CubicSpline
+import healpy as hp
+from scipy.spatial.distance import cdist
+import time
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -49,13 +53,102 @@ def univDen(ds):
     return den.value
 
 def extract_char_radius(rawtree, branch, idx):
-    oden_list = np.array([100, 150, 200, 250, 300, 500, 700])
+    oden_list = np.array([150, 200, 250, 300, 500, 700, 1000])
     char_radius_list = np.array([])
     for oden in oden_list:
         key = 'r%s' % oden
         char_radius_list = np.append(char_radius_list, rawtree[branch][idx][key])
     return oden_list, char_radius_list
 
+def vecs_calc(nside):
+    pix = hp.nside2npix(nside)
+    theta, phi = hp.pix2ang(nside,np.arange(pix))
+    vecs = hp.ang2vec(np.array(theta),np.array(phi))
+    return vecs
+
+def cut_particles(pos,mass,center,ids,idl_i=None,cut_size=700,dense=False,segments=1,timing=0):
+    if timing:
+        time5 = time_sys.time()
+    bool = np.full(len(pos),True)
+    vec = {}
+    if not dense:
+        vec[0] = vecs_calc(1)
+        vec[1] = vecs_calc(1)
+        vec[2] = vecs_calc(1)
+    else:
+        vec[0] = vecs_calc(1)
+        vec[1] = vecs_calc(2)
+        vec[2] = vecs_calc(2)
+    dist_pos = np.linalg.norm(pos-center,axis=1)
+    inner = np.array([40,20,12])
+    annuli = np.linspace(0,dist_pos.max()/3,inner[0])
+    annuli2 = np.linspace(dist_pos.max()/3,2*dist_pos.max()/3,inner[1])[1:]
+    annuli3 = np.linspace(2*dist_pos.max()/3,dist_pos.max(),inner[2])[1:]
+    annuli = np.append(annuli,annuli2)
+    annuli = np.append(annuli,annuli3)
+    index = np.arange(len(pos))
+    for i in range(len(annuli)-1):
+        bool_in_0 = (dist_pos <= annuli[i+1])*(dist_pos > annuli[i])
+        cutlength = cut_size*annuli[i+1]/annuli[-1]
+        current_group = np.arange(len(inner))[(i >= np.cumsum(inner)-inner)*(i < np.cumsum(inner))][0]
+        pos_norm = dist_pos[bool_in_0][:,np.newaxis]
+        pos_in = pos[bool_in_0]
+        vec_ang = np.dot((pos_in-center),vec[current_group].T)
+        if len(np.unique(vec_ang)) != len(vec_ang):
+            vec_ang += vec_ang.min()*1e-5*np.random.random(len(vec_ang[0]))[np.newaxis,:]
+        #pos_group = np.searchsorted(vec_ang,vec_ang.max(axis=1))
+        pos_group = np.where(vec_ang == vec_ang.max(axis=1)[:,np.newaxis])[1]
+        # lenpos = len(pos_group)
+        # lenind = len(index[bool_in_0])
+        # if lenpos > lenind:
+        #     print('Mismatch',lenpos,lenind,vec_ang.shape,pos_in.shape,len(bool_in_0))
+        #     print(np.where(vec_ang == vec_ang.max(axis=1)[:,np.newaxis])[1].shape)
+        #     pos_group = pos_group[:-(lenpos-lenind)]
+        for t in range(len(vec[current_group])):
+            current_index = index[bool_in_0][pos_group==t]
+            if len(current_index) > max(cutlength,max(10/segments,1)):
+                mass_tot = mass[current_index].sum()
+                cut = int(np.ceil(len(current_index)/cutlength))
+                bool[current_index] = False
+                rand_ind = np.random.choice(current_index,size=len(current_index),replace=False)
+                bool[rand_ind[0::cut]] = True
+                mass_in = mass[rand_ind[0::cut]].sum()
+                mass[rand_ind[0::cut]] *= mass_tot/mass_in
+        if timing and time_sys.time()-time5 >timing:
+            print('Make Annuli',time_sys.time()-time5)
+            time5 = time_sys.time()
+    del pos
+    mass[index[np.logical_not(bool)]] *= 1e-10
+    if idl_i is not None:
+            bool = np.logical_or(np.isin(ids,idl_i),bool)
+    return mass[bool], bool
+
+def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
+    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
+    #
+    massA = regA['all','particle_mass'].to('kg')
+    posA = regA['all','particle_position'].to('m')
+    velA = regA['all','particle_velocity'].to('m/s')
+    idsA = regA['all','particle_index'].v
+    posA = posA[massA.to('Msun') > 1]
+    velA = velA[massA.to('Msun') > 1]
+    idsA = idsA[massA.to('Msun') > 1]
+    massA = massA[massA.to('Msun') > 1]
+    #
+    centerA = (rawtree[branch][idx]['Halo_Center']*ds.units.code_length).to('m')
+    #
+    massA_cut, boolA_cut = cut_particles(posA.v,massA.v,centerA.v,idsA)
+    posA_cut = posA[boolA_cut]
+    disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v - posA_cut.v, axis=1)
+    disAinv_cut[~np.isfinite(disAinv_cut)] = 0
+    #
+    PE = (-G.value*massA_cut*disAinv_cut).sum()
+    velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    KE = 0.5*np.linalg.norm(star_vel - velcom)**2
+    E = KE + PE
+    return E
+
+"""
 def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #this function calculate the total orbital energy of a star around a halo
     #the unit of position is code_length and the unit of velocity is code_length/s
@@ -69,11 +162,17 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #Approximate M(r < star_r) by using the overdensity
     oden_list, char_radius_list = extract_char_radius(rawtree, branch, idx)
     char_radius_list = (char_radius_list*ds.units.code_length).to('m').v
-    oden = oden_list[char_radius_list > star_r][-1]
+    if (np.diff(np.flip(char_radius_list)) > 0).all(): #if the overdensity is strictly increasing with decreasing radius 
+        cs = CubicSpline(np.flip(char_radius_list), np.flip(oden_list), extrapolate = 'not-a-knot') #using CubicSpline to interpolate the overdensity
+        oden = cs(star_r)
+    else:
+        oden = oden_list[char_radius_list > star_r][-1] #find the closest overdensity
+    #
     M = (4/3)*np.pi*oden*univDen(ds)*star_r**3
     PE = -G.value*M/star_r
     E = KE + PE
     return E
+"""
 
 def region_number(idx, halo_dir):
     #this function find the refined region that will be used for a given snapshot
@@ -114,7 +213,7 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
         ppos = reg['all', 'particle_position'].to('code_length').v
         pvel = reg['all', 'particle_velocity'].to('km/s').v
         page = reg['all','age'].to('Gyr').v
-        pmet = reg['all','metallicity_fraction'].to('Zsun').v
+        #pmet = reg['all','metallicity_fraction'].to('Zsun').v
         pID = reg['all','particle_index'].v
         #
         star_bool = np.logical_and(np.logical_or(ptype == 5, ptype == 7), pmass > 1)
@@ -124,30 +223,30 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
         sto.result['pos'] = ppos[star_bool]
         sto.result['vel'] = pvel[star_bool]
         sto.result['age'] = page[star_bool]
-        sto.result['met'] = pmet[star_bool]
+        #sto.result['met'] = pmet[star_bool]
         sto.result['ID'] = pID[star_bool]
     #
     output = {}
-    infos = ['type', 'mass', 'pos', 'vel', 'age', 'met', 'ID']
+    infos = ['type', 'mass', 'pos', 'vel', 'age', 'ID']
     for info in infos:
-        if info == 'pos':
+        if info == 'pos' or info == 'vel':
             output[info] = np.empty(shape=(0,3))
         else:
             output[info] = np.array([])
     #Go through different cores/regions to load the stars info to the output
     for c, vals in sorted(my_storage.items()):
         for info in infos:
-            if info == 'pos':
+            if info == 'pos' or info == 'vel':
                 output[info] = np.vstack((output[info], vals[info]))
             else:
                 output[info] = np.append(output[info], vals[info])
     #Because there is a buffer region, we use np.unique to remove the duplicated stars
     if yt.is_root():
-        print('Before removing duplicates, the number of stars is:', len(output['ID']))
+        #print('Before removing duplicates, the number of stars is:', len(output['ID']))
         unique_idx = np.unique(output['ID'], return_index=True)[1]
         for info in infos:
             output[info] = output[info][unique_idx]
-        print('After removing duplicates, the number of stars is:', len(output['ID']))
+        #print('After removing duplicates, the number of stars is:', len(output['ID']))
         print('Star metadata in Snapshot Idx %s is extracted' % idx)
         np.save(metadata_dir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
     return output
@@ -180,15 +279,25 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
       a dictionary containing the halos with the ID of their stars. The keys of the dictionary are the Snapshot indices.
       Each snapshot index is another dictary whose keys are the branches with stars, the SFR, and the total stellar mass.
     """
-    halo_wstars_map = {}
-    output = {}
-    for idx in range(0, len(pfs)):
-        output[idx] = {}
-
+    if glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy') == [] or os.path.exists(metadata_dir + '/' + 'stars_assignment_backup.npy') == False or os.path.exists(metadata_dir + '/' + 'halo_wstars_map.npy') == False: 
+        halo_wstars_map = {}
+        output = {}
+        for idx in range(0, len(pfs)):
+            output[idx] = {}
+        starting_idx = 0
+        restart_flag = False
+    else:
+        halo_wstars_map = np.load(metadata_dir + '/' + 'halo_wstars_map.npy', allow_pickle=True).tolist()
+        output = np.load(metadata_dir + '/' + 'stars_assignment_backup.npy', allow_pickle=True).tolist()
+        starting_idx = list(halo_wstars_map.keys())[-1] + 1
+        restart_flag = True
+    time.sleep(100)
     #------------------------------------------------------------------------
-    for idx in tqdm(range(0, len(pfs))):
+    for idx in tqdm(range(starting_idx, len(pfs))):
         #
         if os.path.exists(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx) == False:
+            if yt.is_root():
+                print('Starting to load the snapshot and extract metadata from Snapshot %s' % idx)
             metadata = extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
         else:
             metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
@@ -197,14 +306,10 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         mass_all = metadata['mass']
         ID_all = metadata['ID']
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
-        #ID_all = np.array(np.load(metadata_dir + '/'  + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
-        #if os.path.exists(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx) == True:
-        #    vel_all = np.array(np.load(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx, allow_pickle=True).tolist()['vel'])
-        #else:
-        #    vel_all = np.empty(shape=(0,3))
-        #
         if idx == 0:
             ID_all_prev = np.array([])
+        elif restart_flag == True:
+            ID_all_prev = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % (idx - 1), allow_pickle=True).tolist()['ID']
         #
         ID_unassign = np.setdiff1d(ID_all, ID_all_prev)
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
@@ -240,9 +345,12 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                     overlap_branch_total.append(branch)
                     E = find_total_E(pos_overlap[k], vel_overlap[k], ds, rawtree, branch, idx)
                     E_list = np.append(E_list, E)
+                if yt.is_root():
+                    print('For this overlapped Star %s, the overlapped branches are %s and the corresponding energies are %s' % (ID_overlap[k], overlap_branch, E_list))
                 bound_branch = overlap_branch[np.argmin(E_list)] #in this step, we don't check whether the total energy of each star is negative, so we also don't check it here. 
                 starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k])
-            print('OVERLAP DETECTED AT BRANCHES', set(overlap_branch_total))
+            if yt.is_root():
+                print('OVERLAP DETECTED AT BRANCHES', set(overlap_branch_total))
         len_starmap = [len(i) for i in starmap_ID]
         # Add stars to subsequent snapshots
         for i in range(len(halo_wstars_branch)):
@@ -255,7 +363,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                             output[j][halo_wstars_branch[i]] = np.append(output[j][halo_wstars_branch[i]], starmap_ID[i])
                 #for subbranch (or deeper sub-branch), the stars in that sub-branch will belong to the branch at lower level after the two halos merge
                 nlevels = halo_wstars_branch[i].count('_')
-                if nlevels > 1:
+                if nlevels > 1 and yt.is_root():
                     print('DEEPER SUB-BRANCHES DETECTED')
                 loop_branch = halo_wstars_branch[i]
                 for level in range(nlevels): #add the stars in the sub-branch to higher branches
@@ -271,8 +379,11 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                     loop_branch = mainbranch
         #
         ID_all_prev = ID_all
+        if yt.is_root():
+            np.save('%s/stars_assignment_backup.npy' % (metadata_dir), output)
+            np.save('%s/halo_wstars_map.npy' % (metadata_dir), halo_wstars_map)
         #
-        if print_mode == True:
+        if print_mode == True and yt.is_root():
             print(idx, 'Number of total unassigned stars is:', len(ID_unassign))
             print('Number of overlapped stars is', len(ID_overlap), ', Number of independent stars is', len(ID_indp))
             print('Halo with stars:', halo_wstars_branch)
@@ -285,17 +396,15 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
     output_final = {} #the re-analyzed output
     for idx in output.keys():
         output_final[idx] = {}
+        ds = yt.load(pfs[idx])
+        length_unit_pc = ds.domain_right_edge[0].to('pc').v.tolist()
+        #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
         mass_all = metadata['mass']
         age_all = metadata['age']
         ID_all = metadata['ID']
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
-        #ID_all = np.array(np.load(metadata_dir + '/' + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
-        #if os.path.exists(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx) == True:
-        #    vel_all = np.array(np.load(metadata_dir + '/' + 'star_vel_allbox_%s.npy' % idx, allow_pickle=True).tolist()['vel'])
-        #else:
-        #    vel_all = np.empty(shape=(0,3))
         for branch in output[idx].keys():
             ID = output[idx][branch]
             #obtain the stars found in the initial output
@@ -316,15 +425,17 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             ID_remain = ID[remain_bool]
             output_final[idx][branch] = {}
             output_final[idx][branch]['ID'] = ID_remain
+            output_final[idx][branch]['length_unit_pc'] = length_unit_pc
             #---------------------------
             #Reassign the "loss" stars to new halos by using bound energy condition
             ID_loss = ID[loss_bool]
             pos_loss = pos[loss_bool]
             vel_loss = vel[loss_bool]
             if len(ID_loss) > 0:
+                if yt.is_root():
+                    print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
                 halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx] #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
-                ds = yt.load(pfs[idx])
                 inside_branch_total = []
                 #loop through each loss star
                 for k in range(len(ID_loss)): 
@@ -337,7 +448,8 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                     E_list = np.array(E_list)
                     if (E_list < 0).any() == True: #if the star is bound to multiple halos, select the one with the most negative total energy
                         bound_branch = inside_branch[np.argmin(E_list)]
-                        print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', bound_branch)
+                        if yt.is_root():
+                            print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', bound_branch)
                         if bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
                             output_final[idx][bound_branch] = {}
                             output_final[idx][bound_branch]['ID'] = np.array([ID_loss[k]])
@@ -351,23 +463,74 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         mass_all = metadata['mass']
         age_all = metadata['age']
         ID_all = metadata['ID']
-        #ID_all = np.array(np.load(metadata_dir + '/' + 'star_ID_allbox_%s.npy' % idx, allow_pickle=True).tolist()).astype(int)
+        type_all = metadata['type']
+        #mets_all = metadata['met']
+        pos_all = metadata['pos']
         for branch in output_final[idx].keys():
             ID = output_final[idx][branch]['ID']
             mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            type = type_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            #mets = mets_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
+            #
+            mass2 = mass[type == 7]
+            age2 = age[type == 7]
+            #mets2 = mets[type == 7]
+            positions2 = pos[type == 7]
+            id2 = ID[type == 7]
+            mass3 = mass[type == 5]
+            age3 = age[type == 5]
+            #mets3 = mets[type == 5]
+            positions3 = pos[type == 5]
+            id3 = ID[type == 5]
+            #
             output_final[idx][branch]['total_mass'] = np.sum(mass)
             output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
+            output_final[idx][branch]['mass2'] = mass2
+            output_final[idx][branch]['age2'] = age2
+            #output_final[idx][branch]['mets2'] = mets2
+            output_final[idx][branch]['positions2'] = positions2
+            output_final[idx][branch]['id2'] = id2
+            output_final[idx][branch]['mass3'] = mass3
+            output_final[idx][branch]['age3'] = age3
+            #output_final[idx][branch]['mets3'] = mets3
+            output_final[idx][branch]['positions3'] = positions3
+            output_final[idx][branch]['id3'] = id3
     return output_final
+
+def branch_first_rearrange(output_final):
+    output_re = {}
+    for snapshot in output_final.keys():
+        for branch in output_final[snapshot].keys():
+            if branch not in output_re.keys():
+                output_re[branch] = {}
+                output_re[branch][snapshot] = output_final[snapshot][branch]
+            else:
+                output_re[branch][snapshot] = output_final[snapshot][branch]
+    return output_re
+
             
 if __name__ == "__main__":
     if nprocs < 128:
         numsegs = 10
     else:
         numsegs = int(np.ceil((nprocs*5)**(1/3)) + 1)
-    rawtree = np.load('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/halotree_1088_final.npy', allow_pickle=True).tolist()
-    pfs = np.loadtxt('/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp/pfs_allsnaps_1088.txt', dtype=str)[:,0]
     halo_dir = '/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp'
-    metadata_dir = '/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/star_metadata'
+    metadata_dir = '/work/hdd/bdax/tnguyen2/sandbox/stars_assignment_code_test/box_2_z_1_no-shield_temp_CubicSplineOden'
+    rawtree = np.load(halo_dir + '/halotree_1405_final.npy', allow_pickle=True).tolist()
+    pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_1405.txt', dtype=str)[:,0]
+    if yt.is_root():
+        print('Done loading data')
     stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
-    np.save('/work/hdd/bdax/gtg115x/new_zoom_5/box_2_z_1_no-shield_temp/stars_assignment.npy', stars_assign_output)
+    np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
+    #
+    #This is to re-arange the data structure to match with Kirk's pipeline
+    branch_first = True
+    if branch_first == True:
+        stars_assign_output_re = branch_first_rearrange(stars_assign_output)
+        np.save(metadata_dir + '/stars_assignment_branchFirst.npy', stars_assign_output_re)
+    #Delete the temporary star_metadata_allbox files
+    #rm_files = glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy')
+    #for file in rm_files:
+    #    os.remove(file)
