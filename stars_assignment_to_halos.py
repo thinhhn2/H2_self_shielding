@@ -8,7 +8,7 @@ import glob as glob
 from scipy.interpolate import CubicSpline
 import healpy as hp
 from scipy.spatial.distance import cdist
-import time
+import time as time_sys
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -121,6 +121,9 @@ def cut_particles(pos,mass,center,ids,idl_i=None,cut_size=700,dense=False,segmen
     return mass[bool], bool
 
 def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
+    #
+    #This function finds the total energy of an array of star particles in one halo at a certain timestep.
+    #
     regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
     #
     massA = regA['all','particle_mass'].to('kg')
@@ -136,40 +139,18 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     massA_cut, boolA_cut = cut_particles(posA.v,massA.v,centerA.v,idsA)
     posA_cut = posA[boolA_cut]
-    disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v - posA_cut.v, axis=1)
+    #
+    disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v[:, np.newaxis] - posA_cut.v, axis=2)
     disAinv_cut[~np.isfinite(disAinv_cut)] = 0
     #
-    PE = (-G.value*massA_cut*disAinv_cut).sum()
+    #disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v - posA_cut.v, axis=1)
+    #disAinv_cut[~np.isfinite(disAinv_cut)] = 0
+    #
+    PE = np.sum(-G.value*massA_cut*disAinv_cut, axis=1)
     velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
-    KE = 0.5*np.linalg.norm(star_vel - velcom)**2
+    KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
     return E
-
-"""
-def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
-    #this function calculate the total orbital energy of a star around a halo
-    #the unit of position is code_length and the unit of velocity is code_length/s
-    star_r_codelength = np.linalg.norm(star_pos - rawtree[branch][idx]['Halo_Center'])
-    star_r = (star_r_codelength*ds.units.code_length).to('m').v
-    #
-    halo_vel = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
-    star_relvel_mag = np.linalg.norm(star_vel - halo_vel)
-    #Kinetic energy
-    KE = 0.5*star_relvel_mag**2
-    #Approximate M(r < star_r) by using the overdensity
-    oden_list, char_radius_list = extract_char_radius(rawtree, branch, idx)
-    char_radius_list = (char_radius_list*ds.units.code_length).to('m').v
-    if (np.diff(np.flip(char_radius_list)) > 0).all(): #if the overdensity is strictly increasing with decreasing radius 
-        cs = CubicSpline(np.flip(char_radius_list), np.flip(oden_list), extrapolate = 'not-a-knot') #using CubicSpline to interpolate the overdensity
-        oden = cs(star_r)
-    else:
-        oden = oden_list[char_radius_list > star_r][-1] #find the closest overdensity
-    #
-    M = (4/3)*np.pi*oden*univDen(ds)*star_r**3
-    PE = -G.value*M/star_r
-    E = KE + PE
-    return E
-"""
 
 def region_number(idx, halo_dir):
     #this function find the refined region that will be used for a given snapshot
@@ -288,7 +269,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         output = np.load(metadata_dir + '/' + 'stars_assignment_backup.npy', allow_pickle=True).tolist()
         starting_idx = list(halo_wstars_map.keys())[-1] + 1
         restart_flag = True
-    time.sleep(100)
+    time_sys.sleep(100)
     #------------------------------------------------------------------------
     for idx in tqdm(range(starting_idx, len(pfs))):
         #
@@ -301,12 +282,12 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         pos_all = metadata['pos']
         age_all = metadata['age']
         mass_all = metadata['mass']
-        ID_all = metadata['ID']
+        ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
         if idx == 0:
             ID_all_prev = np.array([])
         elif restart_flag == True:
-            ID_all_prev = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % (idx - 1), allow_pickle=True).tolist()['ID']
+            ID_all_prev = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % (idx - 1), allow_pickle=True).tolist()['ID'].astype(int)
         #
         ID_unassign = np.setdiff1d(ID_all, ID_all_prev)
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
