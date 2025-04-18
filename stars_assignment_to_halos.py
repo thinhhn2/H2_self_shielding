@@ -5,10 +5,10 @@ import astropy.units as u
 from tqdm import tqdm
 import os
 import glob as glob
-from scipy.interpolate import CubicSpline
 import healpy as hp
 from scipy.spatial.distance import cdist
 import time as time_sys
+import collections
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -140,11 +140,9 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     massA_cut, boolA_cut = cut_particles(posA.v,massA.v,centerA.v,idsA)
     posA_cut = posA[boolA_cut]
     #
-    disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v[:, np.newaxis] - posA_cut.v, axis=2)
+    #use cdist, 100x faster
+    disAinv_cut = 1/cdist((star_pos*ds.units.code_length).to('m').v, posA_cut.v, 'euclidean')
     disAinv_cut[~np.isfinite(disAinv_cut)] = 0
-    #
-    #disAinv_cut = 1/np.linalg.norm((star_pos*ds.units.code_length).to('m').v - posA_cut.v, axis=1)
-    #disAinv_cut[~np.isfinite(disAinv_cut)] = 0
     #
     PE = np.sum(-G.value*massA_cut*disAinv_cut, axis=1)
     velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
@@ -294,7 +292,10 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         vel_unassign = vel_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         #Obtain the halos with stars
         halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, pos_all, idx)
-        halo_wstars_map[idx] = (halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch) #stored it for later used in Step 2 of the code
+        halo_wstars_map[idx] = {} #stored it for later used in Step 2 of the code
+        halo_wstars_map[idx]['pos'] = halo_wstars_pos
+        halo_wstars_map[idx]['rvir'] = halo_wstars_rvir
+        halo_wstars_map[idx]['branch_wstars'] = halo_wstars_branch
         #
         #The shape of halo_boolean is (X,Y), where X is the number of star particles and Y is the number of halos with stars
         halo_boolean = np.linalg.norm(pos_unassign[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
@@ -315,20 +316,26 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             ds = yt.load(pfs[idx])
             pos_overlap = pos_unassign[overlap_boolean > 1]
             vel_overlap = vel_unassign[overlap_boolean > 1]
-            overlap_branch_total = []
+            #overlap_energy_map is a dictionary that contains the energy of a star in each of its overlap regions
+            overlap_energy_map = collections.defaultdict(list)
+            #this for loop calculate the energy for all overlapped stars that are in the same halo to speed up time
+            for i_branch in range(len(halo_wstars_branch)):
+                #Select the IDs that are in the same halo and the same time step for the energy calculation
+                ID_for_erg = ID_overlap[halo_boolean_overlap[:,i_branch]]
+                if len(ID_for_erg) > 0:
+                    pos_for_erg = pos_overlap[halo_boolean_overlap[:,i_branch]]
+                    vel_for_erg = vel_overlap[halo_boolean_overlap[:,i_branch]]
+                    E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree, halo_wstars_branch[i_branch], idx)
+                    for k in range(len(ID_for_erg)):
+                        overlap_energy_map[ID_for_erg[k]].append(E[k])
             for k in range(len(ID_overlap)):
                 overlap_branch = halo_wstars_branch[halo_boolean_overlap[k]]
-                E_list = np.array([])
-                for branch in overlap_branch:
-                    overlap_branch_total.append(branch)
-                    E = find_total_E(pos_overlap[k], vel_overlap[k], ds, rawtree, branch, idx)
-                    E_list = np.append(E_list, E)
+                E_list = overlap_energy_map[ID_overlap[k]]
                 if yt.is_root():
                     print('For this overlapped Star %s, the overlapped branches are %s and the corresponding energies are %s' % (ID_overlap[k], overlap_branch, E_list))
-                bound_branch = overlap_branch[np.argmin(E_list)] #in this step, we don't check whether the total energy of each star is negative, so we also don't check it here. 
-                starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k])
-            if yt.is_root():
-                print('OVERLAP DETECTED AT BRANCHES', set(overlap_branch_total))
+                if np.min(E_list) < 0:
+                    bound_branch = overlap_branch[np.argmin(E_list)]
+                    starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k]) 
         len_starmap = [len(i) for i in starmap_ID]
         # Add stars to subsequent snapshots
         for i in range(len(halo_wstars_branch)):
@@ -412,7 +419,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             if len(ID_loss) > 0:
                 if yt.is_root():
                     print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
-                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx] #obtain the list of halos with stars, the halo_wstars_map is computed above
+                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
                 inside_branch_total = []
                 #loop through each loss star
