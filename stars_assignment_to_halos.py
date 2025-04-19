@@ -123,6 +123,9 @@ def cut_particles(pos,mass,center,ids,idl_i=None,cut_size=700,dense=False,segmen
 def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     #This function finds the total energy of an array of star particles in one halo at a certain timestep.
+    if star_pos.shape() == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
+        star_pos = star_pos.reshape(1,3)
+        star_vel = star_vel.reshape(1,3)
     #
     regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
     #
