@@ -391,7 +391,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         pos_all = metadata['pos']
         mass_all = metadata['mass']
         age_all = metadata['age']
-        ID_all = metadata['ID']
+        ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
         for branch in output[idx].keys():
             ID = output[idx][branch]
@@ -420,31 +420,36 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             pos_loss = pos[loss_bool]
             vel_loss = vel[loss_bool]
             if len(ID_loss) > 0:
+                #loss_energy_map is a dictionary that contains the energy of a star gets outside of its first assigned halo and move to another halo region
+                #The logic here is similar to how we calculate the energy for the overlapped stars
+                loss_energy_map = collections.defaultdict(list)
                 if yt.is_root():
                     print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
                 halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
-                halo_boolean = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
-                inside_branch_total = []
-                #loop through each loss star
-                for k in range(len(ID_loss)): 
-                    inside_branch = halo_wstars_branch[halo_boolean[k]] #these are the branches that the loss stars move to
-                    E_list = np.array([])
-                    for ibranch in inside_branch: #perform energy calculation to see which new halo those loss stars are bound to
-                        inside_branch_total.append(ibranch)
-                        E = find_total_E(pos_loss[k], vel_loss[k], ds, rawtree, ibranch, idx)
-                        E_list = np.append(E_list, E)
-                    E_list = np.array(E_list)
-                    if (E_list < 0).any() == True: #if the star is bound to multiple halos, select the one with the most negative total energy
-                        bound_branch = inside_branch[np.argmin(E_list)]
-                        if yt.is_root():
-                            print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', bound_branch)
-                        if bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
-                            output_final[idx][bound_branch] = {}
-                            output_final[idx][bound_branch]['ID'] = np.array([ID_loss[k]])
-                        else:
-                            output_final[idx][bound_branch]['ID'] = np.append(output_final[idx][bound_branch]['ID'], ID_loss[k])
+                halo_boolean_loss = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
+                for i_branch in range(len(halo_wstars_branch)):
+                    ID_for_erg = ID_loss[halo_boolean_loss[:,i_branch]]
+                    if len(ID_for_erg) > 0:
+                        pos_for_erg = pos_loss[halo_boolean_loss[:,i_branch]]
+                        vel_for_erg = vel_loss[halo_boolean_loss[:,i_branch]]
+                        E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree, halo_wstars_branch[i_branch], idx)
+                        for k in range(len(ID_for_erg)):
+                            loss_energy_map[ID_for_erg[k]].append(E[k])
+                for k in range(len(ID_loss)):
+                    loss_branch = halo_wstars_branch[halo_boolean_loss[k]] #these are the branches that the loss stars move to
+                    if ID_loss[k] in loss_energy_map.keys():
+                        E_list = loss_energy_map[ID_loss[k]]
+                        if np.min(E_list) < 0:
+                            new_bound_branch = loss_branch[np.argmin(E_list)]
+                            if yt.is_root():
+                                print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
+                            if new_bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
+                                output_final[idx][new_bound_branch] = {}
+                                output_final[idx][new_bound_branch]['ID'] = np.array([ID_loss[k]])
+                            else:
+                                output_final[idx][new_bound_branch]['ID'] = np.append(output_final[idx][new_bound_branch]['ID'], ID_loss[k])
                     else:
-                        continue #the star is not bound to any halo, skip this star            
+                        continue #the star is not bound to any halo, skip this star   
     #Finalize the output_final star ID and calculate the unique total stellar mass and SFR.
     for idx in output_final.keys():
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
