@@ -382,7 +382,6 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
     for idx in tqdm(range(starting_idx_step2, len(pfs))):
         output_final[idx] = {}
         ds = yt.load(pfs[idx])
-        length_unit_pc = ds.domain_right_edge[0].to('pc').v.tolist()
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
@@ -410,7 +409,6 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             ID_remain = ID[remain_bool]
             output_final[idx][branch] = {}
             output_final[idx][branch]['ID'] = ID_remain
-            output_final[idx][branch]['length_unit_pc'] = length_unit_pc
             #---------------------------
             #Reassign the "loss" stars to new halos by using bound energy condition
             ID_loss = ID[loss_bool]
