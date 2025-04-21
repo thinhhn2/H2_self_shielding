@@ -344,7 +344,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                             output[j][halo_wstars_branch[i]] = np.append(output[j][halo_wstars_branch[i]], starmap_ID[i])
                 #for subbranch (or deeper sub-branch), the stars in that sub-branch will belong to the branch at lower level after the two halos merge
                 nlevels = halo_wstars_branch[i].count('_')
-                if nlevels > 1 and yt.is_root():
+                if nlevels > 1:
                     print('DEEPER SUB-BRANCHES DETECTED')
                 loop_branch = halo_wstars_branch[i]
                 for level in range(nlevels): #add the stars in the sub-branch to higher branches
@@ -420,8 +420,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                 #loss_energy_map is a dictionary that contains the energy of a star gets outside of its first assigned halo and move to another halo region
                 #The logic here is similar to how we calculate the energy for the overlapped stars
                 loss_energy_map = collections.defaultdict(list)
-                if yt.is_root():
-                    print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
+                print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
                 halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean_loss = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
                 for i_branch in range(len(halo_wstars_branch)):
@@ -438,8 +437,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                         E_list = loss_energy_map[ID_loss[k]]
                         if np.min(E_list) < 0:
                             new_bound_branch = loss_branch[np.argmin(E_list)]
-                            if yt.is_root():
-                                print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
+                            print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
                             if new_bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
                                 output_final[idx][new_bound_branch] = {}
                                 output_final[idx][new_bound_branch]['ID'] = np.array([ID_loss[k]])
