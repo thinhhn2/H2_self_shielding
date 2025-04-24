@@ -125,7 +125,7 @@ def cut_particles(pos,mass,center,ids,idl_i=None,cut_size=700,dense=False,segmen
 def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     #This function finds the total energy of an array of star particles in one halo at a certain timestep.
-    if star_pos.shape() == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
+    if star_pos.shape == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
         star_pos = star_pos.reshape(1,3)
         star_vel = star_vel.reshape(1,3)
     #
@@ -230,7 +230,7 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
         #print('After removing duplicates, the number of stars is:', len(output['ID']))
         print('Star metadata in Snapshot Idx %s is extracted' % idx)
         np.save(metadata_dir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
-    return output
+    return None
 
 def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True):
     """
@@ -260,7 +260,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
       a dictionary containing the halos with the ID of their stars. The keys of the dictionary are the Snapshot indices.
       Each snapshot index is another dictary whose keys are the branches with stars, the SFR, and the total stellar mass.
     """
-    if glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy') == [] or os.path.exists(metadata_dir + '/' + 'stars_assignment_backup.npy') == False or os.path.exists(metadata_dir + '/' + 'halo_wstars_map.npy') == False: 
+    if glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy') == [] or os.path.exists(metadata_dir + '/' + 'stars_assignment_step1_backup.npy') == False or os.path.exists(metadata_dir + '/' + 'halo_wstars_map.npy') == False: 
         halo_wstars_map = {}
         output = {}
         for idx in range(0, len(pfs)):
@@ -269,19 +269,13 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         restart_flag = False
     else:
         halo_wstars_map = np.load(metadata_dir + '/' + 'halo_wstars_map.npy', allow_pickle=True).tolist()
-        output = np.load(metadata_dir + '/' + 'stars_assignment_backup.npy', allow_pickle=True).tolist()
+        output = np.load(metadata_dir + '/' + 'stars_assignment_step1_backup.npy', allow_pickle=True).tolist()
         starting_idx = list(halo_wstars_map.keys())[-1] + 1
         restart_flag = True
-    time_sys.sleep(100)
     #------------------------------------------------------------------------
     for idx in tqdm(range(starting_idx, len(pfs))):
         #
-        if os.path.exists(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx) == False:
-            if yt.is_root():
-                print('Starting to load the snapshot and extract metadata from Snapshot %s' % idx)
-            metadata = extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
-        else:
-            metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
+        metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
         age_all = metadata['age']
         mass_all = metadata['mass']
@@ -336,8 +330,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             for k in range(len(ID_overlap)):
                 overlap_branch = halo_wstars_branch[halo_boolean_overlap[k]]
                 E_list = overlap_energy_map[ID_overlap[k]]
-                if yt.is_root():
-                    print('For this overlapped Star %s, the overlapped branches are %s and the corresponding energies are %s' % (ID_overlap[k], overlap_branch, E_list))
+                print('For this overlapped Star %s, the overlapped branches are %s and the corresponding energies are %s' % (ID_overlap[k], overlap_branch, E_list))
                 if np.min(E_list) < 0:
                     bound_branch = overlap_branch[np.argmin(E_list)]
                     starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k]) 
@@ -353,7 +346,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                             output[j][halo_wstars_branch[i]] = np.append(output[j][halo_wstars_branch[i]], starmap_ID[i])
                 #for subbranch (or deeper sub-branch), the stars in that sub-branch will belong to the branch at lower level after the two halos merge
                 nlevels = halo_wstars_branch[i].count('_')
-                if nlevels > 1 and yt.is_root():
+                if nlevels > 1:
                     print('DEEPER SUB-BRANCHES DETECTED')
                 loop_branch = halo_wstars_branch[i]
                 for level in range(nlevels): #add the stars in the sub-branch to higher branches
@@ -369,11 +362,10 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                     loop_branch = mainbranch
         #
         ID_all_prev = ID_all
-        if yt.is_root():
-            np.save('%s/stars_assignment_backup.npy' % (metadata_dir), output)
-            np.save('%s/halo_wstars_map.npy' % (metadata_dir), halo_wstars_map)
+        np.save('%s/stars_assignment_step1_backup.npy' % (metadata_dir), output)
+        np.save('%s/halo_wstars_map.npy' % (metadata_dir), halo_wstars_map)
         #
-        if print_mode == True and yt.is_root():
+        if print_mode == True:
             print(idx, 'Number of total unassigned stars is:', len(ID_unassign))
             print('Number of overlapped stars is', len(ID_overlap), ', Number of independent stars is', len(ID_indp))
             print('Halo with stars:', halo_wstars_branch)
@@ -383,11 +375,15 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
     #The unique stellar mass and SFR is also calculated in this step. 
     #print(halo_wstars_map)
     #print(output)
-    output_final = {} #the re-analyzed output
-    for idx in output.keys():
+    if os.path.exists(metadata_dir + '/' + 'stars_assignment_step2_backup.npy') == False:
+        output_final = {} #the re-analyzed output
+        starting_idx_step2 = 0
+    else:
+        output_final = np.load(metadata_dir + '/' + 'stars_assignment_step2_backup.npy', allow_pickle=True).tolist()
+        starting_idx_step2 = list(output_final.keys())[-1] + 1
+    for idx in tqdm(range(starting_idx_step2, len(pfs))):
         output_final[idx] = {}
         ds = yt.load(pfs[idx])
-        length_unit_pc = ds.domain_right_edge[0].to('pc').v.tolist()
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
@@ -415,7 +411,6 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             ID_remain = ID[remain_bool]
             output_final[idx][branch] = {}
             output_final[idx][branch]['ID'] = ID_remain
-            output_final[idx][branch]['length_unit_pc'] = length_unit_pc
             #---------------------------
             #Reassign the "loss" stars to new halos by using bound energy condition
             ID_loss = ID[loss_bool]
@@ -425,8 +420,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                 #loss_energy_map is a dictionary that contains the energy of a star gets outside of its first assigned halo and move to another halo region
                 #The logic here is similar to how we calculate the energy for the overlapped stars
                 loss_energy_map = collections.defaultdict(list)
-                if yt.is_root():
-                    print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
+                print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
                 halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
                 halo_boolean_loss = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
                 for i_branch in range(len(halo_wstars_branch)):
@@ -443,15 +437,16 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
                         E_list = loss_energy_map[ID_loss[k]]
                         if np.min(E_list) < 0:
                             new_bound_branch = loss_branch[np.argmin(E_list)]
-                            if yt.is_root():
-                                print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
+                            print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
                             if new_bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
                                 output_final[idx][new_bound_branch] = {}
                                 output_final[idx][new_bound_branch]['ID'] = np.array([ID_loss[k]])
                             else:
                                 output_final[idx][new_bound_branch]['ID'] = np.append(output_final[idx][new_bound_branch]['ID'], ID_loss[k])
                     else:
-                        continue #the star is not bound to any halo, skip this star   
+                        continue #the star is not bound to any halo, skip this star  
+        #Save for backup
+        np.save('%s/stars_assignment_step2_backup.npy' % (metadata_dir), output_final)
     #Finalize the output_final star ID and calculate the unique total stellar mass and SFR.
     for idx in output_final.keys():
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
@@ -517,15 +512,20 @@ if __name__ == "__main__":
     pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_1405.txt', dtype=str)[:,0]
     if yt.is_root():
         print('Done loading data')
-    stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
-    np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
     #
-    #This is to re-arange the data structure to match with Kirk's pipeline
-    branch_first = True
-    if branch_first == True:
-        stars_assign_output_re = branch_first_rearrange(stars_assign_output)
-        np.save(metadata_dir + '/stars_assignment_branchFirst.npy', stars_assign_output_re)
-    #Delete the temporary star_metadata_allbox files
-    #rm_files = glob.glob(metadata_dir + '/' + 'star_metadata_allbox_*.npy')
-    #for file in rm_files:
-    #    os.remove(file)
+    #This is to extract the star metadata from the simulation box
+    for idx in tqdm(range(0, len(pfs))):
+        if os.path.exists(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx) == False:
+            if yt.is_root():
+                print('Starting to extract metadata from Snapshot %s' % idx)
+            extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
+    #
+    if yt.is_root():
+        stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
+        np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
+        #
+        #This is to re-arange the data structure to match with Kirk's pipeline
+        branch_first = True
+        if branch_first == True:
+            stars_assign_output_re = branch_first_rearrange(stars_assign_output)
+            np.save(metadata_dir + '/stars_assignment_branchFirst.npy', stars_assign_output_re)
