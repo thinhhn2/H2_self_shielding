@@ -282,7 +282,7 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         if idx == 0:
             ID_all_prev = np.array([])
         elif restart_flag == True:
-            ID_all_prev = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % (idx - 1), allow_pickle=True).tolist()['ID'].astype(int)
+            ID_all_prev = np.concatenate(list(output[idx - 1].values())).astype(int) #these are the ID of the stars that are already assigned to halos in the previous snapshot. This also helps address the issue of a main progenitor branch ending before the last snapshot.
         #
         ID_unassign = np.setdiff1d(ID_all, ID_all_prev)
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
