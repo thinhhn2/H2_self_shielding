@@ -230,7 +230,7 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
         np.save(metadata_dir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
     return None
 
-def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True):
+def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
     This function uniquely assigns each star in the simulation box to a halo. 
     There are two steps:
@@ -452,24 +452,20 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
         age_all = metadata['age']
         ID_all = metadata['ID']
         type_all = metadata['type']
-        #mets_all = metadata['met']
         pos_all = metadata['pos']
         for branch in output_final[idx].keys():
             ID = output_final[idx][branch]['ID']
             mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             type = type_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
-            #mets = mets_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
             mass2 = mass[type == 7]
             age2 = age[type == 7]
-            #mets2 = mets[type == 7]
             positions2 = pos[type == 7]
             id2 = ID[type == 7]
             mass3 = mass[type == 5]
             age3 = age[type == 5]
-            #mets3 = mets[type == 5]
             positions3 = pos[type == 5]
             id3 = ID[type == 5]
             #
@@ -477,12 +473,10 @@ def stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode =
             output_final[idx][branch]['sfr'] = np.sum(mass[age < 0.01])/1e7
             output_final[idx][branch]['mass2'] = mass2
             output_final[idx][branch]['age2'] = age2
-            #output_final[idx][branch]['mets2'] = mets2
             output_final[idx][branch]['positions2'] = positions2
             output_final[idx][branch]['id2'] = id2
             output_final[idx][branch]['mass3'] = mass3
             output_final[idx][branch]['age3'] = age3
-            #output_final[idx][branch]['mets3'] = mets3
             output_final[idx][branch]['positions3'] = positions3
             output_final[idx][branch]['id3'] = id3
     return output_final
@@ -519,7 +513,7 @@ if __name__ == "__main__":
             extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
     #
     if yt.is_root():
-        stars_assign_output = stars_assignment(rawtree, pfs, halo_dir, metadata_dir, numsegs, print_mode = True)
+        stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = True)
         np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
         #
         #This is to re-arange the data structure to match with Kirk's pipeline
