@@ -40,23 +40,6 @@ def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
-def univDen(ds):
-    # Hubble constant
-    H0 = ds.hubble_constant * 100 * u.km/u.s/u.Mpc
-    H = H0**2 * (ds.omega_matter*(1 + ds.current_redshift)**3 + ds.omega_lambda)  # Technically H^2
-    G = 6.67e-11 * u.m**3/u.s**2/u.kg
-    # Density of the universe
-    den = (3*H/(8*np.pi*G)).to("kg/m**3") / u.kg * u.m**3
-    return den.value
-
-def extract_char_radius(rawtree, branch, idx):
-    oden_list = np.array([150, 200, 250, 300, 500, 700, 1000])
-    char_radius_list = np.array([])
-    for oden in oden_list:
-        key = 'r%s' % oden
-        char_radius_list = np.append(char_radius_list, rawtree[branch][idx][key])
-    return oden_list, char_radius_list
-
 def vecs_calc(nside):
     pix = hp.nside2npix(nside)
     theta, phi = hp.pix2ang(nside,np.arange(pix))
@@ -120,7 +103,7 @@ def cut_particles(pos,mass,center,ids,idl_i=None,cut_size=700,dense=False,segmen
             bool = np.logical_or(np.isin(ids,idl_i),bool)
     return mass[bool], bool
 
-def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
+def find_total_E_cut(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     #This function finds the total energy of an array of star particles in one halo at a certain timestep.
     if star_pos.shape == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
@@ -148,6 +131,37 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     disAinv_cut[~np.isfinite(disAinv_cut)] = 0
     #
     PE = np.sum(-G.value*massA_cut*disAinv_cut, axis=1)
+    velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
+    E = KE + PE
+    return E
+
+def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
+    #
+    #This function finds the total energy of an array of star particles in one halo at a certain timestep.
+    if star_pos.shape == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
+        star_pos = star_pos.reshape(1,3)
+        star_vel = star_vel.reshape(1,3)
+    #
+    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
+    #
+    massA = regA['all','particle_mass'].to('kg')
+    posA = regA['all','particle_position'].to('m')
+    velA = regA['all','particle_velocity'].to('m/s')
+    #
+    boolmass = massA.to('Msun') > 1
+    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= rawtree[branch][idx]['Halo_Radius']
+    boolall = boolmass*boolloc
+    #
+    posA = posA[boolall]
+    velA = velA[boolall]
+    massA = massA[boolall]
+    #
+    #use cdist, 100x faster
+    disAinv = 1/cdist((star_pos*ds.units.code_length).to('m').v, posA.v, 'euclidean')
+    disAinv[~np.isfinite(disAinv)] = 0
+    #
+    PE = np.sum(-G.value*massA.to('kg').v*disAinv, axis=1)
     velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
