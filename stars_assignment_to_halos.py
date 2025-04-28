@@ -11,6 +11,7 @@ import healpy as hp
 from scipy.spatial.distance import cdist
 import time as time_sys
 import collections
+import sys
 
 yt.enable_parallelism()
 from mpi4py import MPI
@@ -195,8 +196,6 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
-        age_all = metadata['age']
-        mass_all = metadata['mass']
         ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
         if idx == 0:
@@ -307,16 +306,12 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
-        mass_all = metadata['mass']
-        age_all = metadata['age']
         ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
         for branch in output[idx].keys():
             ID = output[idx][branch]
             #obtain the stars found in the initial output
             pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
-            mass = mass_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
-            age = age_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             ID = ID_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
@@ -420,10 +415,11 @@ if __name__ == "__main__":
         numsegs = 10
     else:
         numsegs = int(np.ceil((nprocs*5)**(1/3)) + 1)
-    halo_dir = '/work/hdd/bdax/gtg115x/Halo_Finding/box_2_z_1_no-shield_temp'
-    metadata_dir = '/work/hdd/bdax/tnguyen2/sandbox/stars_assignment_code_test/box_2_z_1_no-shield_temp_CubicSplineOden'
-    rawtree = np.load(halo_dir + '/halotree_1405_final.npy', allow_pickle=True).tolist()
-    pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_1405.txt', dtype=str)[:,0]
+    halo_dir = sys.argv[1]
+    metadata_dir = sys.argv[2]
+    halotree_ver = sys.argv[3]
+    rawtree = np.load(halo_dir + '/halotree_%s_final.npy' % halotree_ver, allow_pickle=True).tolist()
+    pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_%s.txt' % halotree_ver, dtype=str)[:,0]
     if yt.is_root():
         print('Done loading data')
     #
