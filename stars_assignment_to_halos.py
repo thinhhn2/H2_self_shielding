@@ -248,10 +248,12 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             for k in range(len(ID_overlap)):
                 overlap_branch = halo_wstars_branch[halo_boolean_overlap[k]]
                 E_list = overlap_energy_map[ID_overlap[k]]
-                print('For this overlapped Star %s, the overlapped branches are %s and the corresponding energies are %s' % (ID_overlap[k], overlap_branch, E_list))
                 if np.min(E_list) < 0:
                     bound_branch = overlap_branch[np.argmin(E_list)]
                     starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k]) 
+                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is assigned to Branch %s.' % (ID_overlap[k], overlap_branch, E_list, bound_branch))
+                else:
+                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is NOT bound to any branches.' % (ID_overlap[k], overlap_branch, E_list))
         len_starmap = [len(i) for i in starmap_ID]
         # Add stars to subsequent snapshots
         for i in range(len(halo_wstars_branch)):
