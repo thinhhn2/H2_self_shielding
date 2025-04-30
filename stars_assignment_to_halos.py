@@ -67,11 +67,13 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #use cdist, 100x faster
     disAinv = 1/cdist((star_pos*ds.units.code_length).to('m').v, posA.v, 'euclidean')
     disAinv[~np.isfinite(disAinv)] = 0
+    disAinv[np.isnan(disAinv)] = 0
     #
     PE = np.sum(-G.value*massA.to('kg').v*disAinv, axis=1)
     velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
+    E[np.isnan(E)] = 1e99
     return E
 
 def region_number(idx, halo_dir):
@@ -422,6 +424,7 @@ if __name__ == "__main__":
     pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_%s.txt' % halotree_ver, dtype=str)[:,0]
     if yt.is_root():
         print('Done loading data')
+        print(metadata_dir)
     #
     #This is to extract the star metadata from the simulation box
     for idx in tqdm(range(0, len(pfs))):
