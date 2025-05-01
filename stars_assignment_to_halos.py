@@ -1,4 +1,4 @@
-#VERSION 7: FIX BUGS WHEN LOADING ID_ALL_PREV + TIDY UP THE CODE
+#VERSION 8: REPLACE 'HALO_RADIUS' WITH 'R200' FOR SMOOTHER RADIUS CHANGES
 
 import numpy as np
 import yt
@@ -37,9 +37,9 @@ def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_branch = np.array([])
     for branch, vals in rawtree.items():
         if idx in vals.keys():
-            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < rawtree[branch][idx]['Halo_Radius']).any():
+            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < rawtree[branch][idx]['r200']).any():
                 halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center']))
-                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius'])
+                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['r200'])
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
@@ -50,14 +50,14 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
         star_pos = star_pos.reshape(1,3)
         star_vel = star_vel.reshape(1,3)
     #
-    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
+    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['r200'])
     #
     massA = regA['all','particle_mass'].to('kg')
     posA = regA['all','particle_position'].to('m')
     velA = regA['all','particle_velocity'].to('m/s')
     #
     boolmass = massA.to('Msun') > 1
-    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= rawtree[branch][idx]['Halo_Radius']
+    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= rawtree[branch][idx]['r200']
     boolall = boolmass*boolloc
     #
     posA = posA[boolall]
@@ -316,7 +316,7 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
             halo_center = rawtree[branch][idx]['Halo_Center']
-            halo_radius = rawtree[branch][idx]['Halo_Radius']
+            halo_radius = rawtree[branch][idx]['r200']
             #
             #remain_bool: stars that still remain in the halo where they are born
             #loss_bool: stars that move out of the halo where they were born 
