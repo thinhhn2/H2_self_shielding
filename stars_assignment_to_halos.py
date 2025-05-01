@@ -1,4 +1,4 @@
-#VERSION 6: USE FULL LIST OF PARTICLES FOR SOLVING ENERGY + REMOVE ASSUMPTIONS THAT PROGENITOR BRANCHES EXISTS TILL THE LAST SNAPSHOT
+#VERSION 7: FIX BUGS WHEN LOADING ID_ALL_PREV + TIDY UP THE CODE
 
 import numpy as np
 import yt
@@ -187,12 +187,10 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
         for idx in range(0, len(pfs)):
             output[idx] = {}
         starting_idx = 0
-        restart_flag = False
     else:
         halo_wstars_map = np.load(metadata_dir + '/' + 'halo_wstars_map.npy', allow_pickle=True).tolist()
         output = np.load(metadata_dir + '/' + 'stars_assignment_step1_backup.npy', allow_pickle=True).tolist()
         starting_idx = list(halo_wstars_map.keys())[-1] + 1
-        restart_flag = True
     #------------------------------------------------------------------------
     for idx in tqdm(range(starting_idx, len(pfs))):
         #
@@ -200,10 +198,10 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
         pos_all = metadata['pos']
         ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
-        if idx == 0:
+        if idx == 0 or len(list(output[idx].keys())) == 0:
             ID_all_prev = np.array([])
-        elif restart_flag == True:
-            ID_all_prev = np.concatenate(list(output[idx - 1].values())).astype(int) #these are the ID of the stars that are already assigned to halos in the previous snapshot. This also helps address the issue of a main progenitor branch ending before the last snapshot.
+        else:
+            ID_all_prev = np.concatenate(list(output[idx].values())).astype(int) #these are the ID of the stars that are already assigned to halos in the previous snapshot. This also helps address the issue of a main progenitor branch ending before the last snapshot.
         #
         ID_unassign = np.setdiff1d(ID_all, ID_all_prev)
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
@@ -282,7 +280,7 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
                             output[j][mainbranch] = np.append(output[j][mainbranch], starmap_ID[i])
                     loop_branch = mainbranch
         #
-        ID_all_prev = ID_all
+        #ID_all_prev = ID_all
         np.save('%s/stars_assignment_step1_backup.npy' % (metadata_dir), output)
         np.save('%s/halo_wstars_map.npy' % (metadata_dir), halo_wstars_map)
         #
