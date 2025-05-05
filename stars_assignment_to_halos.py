@@ -1,4 +1,4 @@
-#VERSION 9: USE SAVIZKY-GOLAY FILTERING TO SMOOTHEN THE CHANGE IN HALO POSITION AND RAIDUS 
+#VERSION 10: IN STEP 2 OF THE CODE, ONCE A STAR GETS OUTSIDE THEIR ORIGINAL HALO, CALCULATE ITS ENERGY FOR THE REST OF THE TIMESTEP
 
 import numpy as np
 import yt
@@ -201,7 +201,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
     This function uniquely assigns each star in the simulation box to a halo. 
     There are two steps:
     + Step 1: Locate the halo where a star is born in. If a star is born in the intersection of multiple halos, perform energy calculation to see which halo that star belongs to. Assume that that star remains in that halo until the end of the simulation. If that halo is a sub-halo, add that star to the main halo when the two halos merge. This step helps speed up the star assignment process because we don't need to calculate the orbital energy of each star.
-    + Step 2: Re-evaluate the assumption and output from Step 1. If a star moves outside of the in-situ halo at a certain timestep (hereby called "loss star"), remove that star from that halo, and find whether that star is bound to another halo. This steps require enegy calculation for each loss star, but the number of loss stars is much smaller than the total number of stars.
+    + Step 2: Re-evaluate the assumption and output from Step 1. If a star moves outside of the in-situ halo at a certain timestep (hereby called "reassign star"), remove that star from that halo, and find whether that star is bound to another halo. This steps require enegy calculation for each reassigned star, but the number of reassigned stars is much smaller than the total number of stars.
     ---
     Input
     ---
@@ -339,9 +339,15 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
     #print(output)
     if os.path.exists(metadata_dir + '/' + 'stars_assignment_step2_backup.npy') == False:
         output_final = {} #the re-analyzed output
+        reassign_dict = {} #the list of stars that need to be re-assigned during step 2 of the code
+        for idx in range(0, len(pfs)):
+            reassign_dict[idx] = np.array([]).astype(int)
+        prev_halo_map = collections.defaultdict(list) #the dictionary containing the branch each star belongs to in Step 1 of the code
         starting_idx_step2 = 0
     else:
         output_final = np.load(metadata_dir + '/' + 'stars_assignment_step2_backup.npy', allow_pickle=True).tolist()
+        reassign_dict = np.load(metadata_dir + '/' + 'reassign_dict_step2.npy', allow_pickle=True).tolist()
+        prev_halo_map = np.load(metadata_dir + '/' + 'prev_halo_map_step2.npy', allow_pickle=True).tolist()
         starting_idx_step2 = list(output_final.keys())[-1] + 1
     for idx in tqdm(range(starting_idx_step2, len(pfs))):
         output_final[idx] = {}
@@ -366,45 +372,56 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
             remain_bool = np.linalg.norm(pos - halo_center, axis=1) < halo_radius
             loss_bool = np.linalg.norm(pos - halo_center, axis=1) >= halo_radius
             #------------------------
+            #Reassign the "loss" stars to new halos by using bound energy condition. Note that when a star is lose, we will check its energy for the rest of the timestep. 
+            ID_loss = ID[loss_bool]
+            for ID_loss_i in ID_loss:
+                if ID_loss_i not in prev_halo_map.keys():
+                    prev_halo_map[ID_loss_i] = branch
+            if len(ID_loss) > 0:
+                for j in range(idx, max(extract_and_order_snapshotIdx(rawtree, branch)) + 1):
+                    reassign_dict[j] = np.append(reassign_dict[j], ID_loss)
+                    reassign_dict[j] = np.unique(reassign_dict[j])
+            #------------------------
             ID_remain = ID[remain_bool]
+            ID_remain = np.setdiff1d(ID_remain, reassign_dict[idx])
             output_final[idx][branch] = {}
             output_final[idx][branch]['ID'] = ID_remain
-            #---------------------------
-            #Reassign the "loss" stars to new halos by using bound energy condition
-            ID_loss = ID[loss_bool]
-            pos_loss = pos[loss_bool]
-            vel_loss = vel[loss_bool]
-            if len(ID_loss) > 0:
-                #loss_energy_map is a dictionary that contains the energy of a star gets outside of its first assigned halo and move to another halo region
-                #The logic here is similar to how we calculate the energy for the overlapped stars
-                loss_energy_map = collections.defaultdict(list)
-                print('At Snapshot', idx, 'and Branch', branch, ', %s stars move out of the halo' % len(ID_loss))
-                halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
-                halo_boolean_loss = np.linalg.norm(pos_loss[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
-                for i_branch in range(len(halo_wstars_branch)):
-                    ID_for_erg = ID_loss[halo_boolean_loss[:,i_branch]]
-                    if len(ID_for_erg) > 0:
-                        pos_for_erg = pos_loss[halo_boolean_loss[:,i_branch]]
-                        vel_for_erg = vel_loss[halo_boolean_loss[:,i_branch]]
-                        E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree_s, halo_wstars_branch[i_branch], idx)
-                        for k in range(len(ID_for_erg)):
-                            loss_energy_map[ID_for_erg[k]].append(E[k])
-                for k in range(len(ID_loss)):
-                    loss_branch = halo_wstars_branch[halo_boolean_loss[k]] #these are the branches that the loss stars move to
-                    if ID_loss[k] in loss_energy_map.keys():
-                        E_list = loss_energy_map[ID_loss[k]]
-                        if np.min(E_list) < 0:
-                            new_bound_branch = loss_branch[np.argmin(E_list)]
-                            print('At Snapshot', idx, 'Star', ID_loss[k], 'move from Branch', branch, 'to', new_bound_branch)
-                            if new_bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
-                                output_final[idx][new_bound_branch] = {}
-                                output_final[idx][new_bound_branch]['ID'] = np.array([ID_loss[k]])
-                            else:
-                                output_final[idx][new_bound_branch]['ID'] = np.append(output_final[idx][new_bound_branch]['ID'], ID_loss[k])
+        #-------------------------
+        #reassign_energy_map is a dictionary that contains the energy of a star gets outside of its first assigned halo and move to another halo region
+        #The logic here is similar to how we calculate the energy for the overlapped stars
+        reassign_energy_map = collections.defaultdict(list)
+        pos_reassign = pos_all[np.intersect1d(ID_all, reassign_dict[idx], return_indices=True)[1]]
+        vel_reassign = vel_all[np.intersect1d(ID_all, reassign_dict[idx], return_indices=True)[1]]
+        ID_reassign = ID_all[np.intersect1d(ID_all, reassign_dict[idx], return_indices=True)[1]]
+        print('At Snapshot', idx, ', %s stars need to be re-assigned' % len(reassign_dict[idx]))
+        halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
+        halo_boolean_reassign = np.linalg.norm(pos_reassign[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
+        for i_branch in range(len(halo_wstars_branch)):
+            ID_for_erg = ID_reassign[halo_boolean_reassign[:,i_branch]]
+            if len(ID_for_erg) > 0:
+                pos_for_erg = pos_reassign[halo_boolean_reassign[:,i_branch]]
+                vel_for_erg = vel_reassign[halo_boolean_reassign[:,i_branch]]
+                E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree_s, halo_wstars_branch[i_branch], idx)
+                for k in range(len(ID_for_erg)):
+                    reassign_energy_map[ID_for_erg[k]].append(E[k])
+        for k in range(len(ID_reassign)):
+            reassign_branch = halo_wstars_branch[halo_boolean_reassign[k]] #these are the branches that the reassigned stars move to (before the reassignment and energy calculation)
+            if ID_reassign[k] in reassign_energy_map.keys():
+                E_list = reassign_energy_map[ID_reassign[k]]
+                if np.min(E_list) < 0:
+                    new_bound_branch = reassign_branch[np.argmin(E_list)]
+                    print('At Snapshot', idx, 'Star', ID_reassign[k], 'move from Branch', prev_halo_map[ID_reassign[k]], 'to', new_bound_branch)
+                    if new_bound_branch not in output_final[idx].keys(): #add the stars bounded with the new halo to the output_final
+                        output_final[idx][new_bound_branch] = {}
+                        output_final[idx][new_bound_branch]['ID'] = np.array([ID_reassign[k]])
                     else:
-                        continue #the star is not bound to any halo, skip this star  
+                        output_final[idx][new_bound_branch]['ID'] = np.append(output_final[idx][new_bound_branch]['ID'], ID_reassign[k])
+            else:
+                continue #the star is not bound to any halo, skip this star  
         #Save for backup
         np.save('%s/stars_assignment_step2_backup.npy' % (metadata_dir), output_final)
+        np.save('%s/reassign_dict_step2.npy' % (metadata_dir), reassign_dict)
+        np.save('%s/prev_halo_map_step2.npy' % (metadata_dir), prev_halo_map)
     #Finalize the output_final star ID and calculate the unique total stellar mass and SFR.
     for idx in output_final.keys():
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
@@ -480,6 +497,7 @@ if __name__ == "__main__":
             rawtree_s = apply_savgol_filter(rawtree, halo_dir, halotree_ver)
         else:
             rawtree_s = np.load(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver, allow_pickle=True).tolist()
+        print('Done smoothening halotree results')
         #
         stars_assign_output = stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True)
         np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
