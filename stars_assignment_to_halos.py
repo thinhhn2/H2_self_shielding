@@ -1,4 +1,4 @@
-#VERSION 10: IN STEP 2 OF THE CODE, ONCE A STAR GETS OUTSIDE THEIR ORIGINAL HALO, CALCULATE ITS ENERGY FOR THE REST OF THE TIMESTEP
+#VERSION 11: RE-EVALUATING ENERGY FOR HIGH-VELOCITY STAR PARTICLES
 
 import numpy as np
 import yt
@@ -229,10 +229,12 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         output = {}
         for idx in range(0, len(pfs)):
             output[idx] = {}
+        highvel_IDs = np.array([])
         starting_idx = 0
     else:
         halo_wstars_map = np.load(metadata_dir + '/' + 'halo_wstars_map.npy', allow_pickle=True).tolist()
         output = np.load(metadata_dir + '/' + 'stars_assignment_step1_backup.npy', allow_pickle=True).tolist()
+        highvel_IDs = np.load(metadata_dir + '/' + 'highvel_IDs.npy', allow_pickle=True).tolist()
         starting_idx = list(halo_wstars_map.keys())[-1] + 1
     #------------------------------------------------------------------------
     for idx in tqdm(range(starting_idx, len(pfs))):
@@ -262,9 +264,12 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         overlap_boolean = np.sum(halo_boolean, axis=1) 
         #
         ID_overlap = ID_unassign[overlap_boolean > 1]
-        halo_boolean_overlap = halo_boolean[overlap_boolean > 1]
+        ID_overlap = np.append(ID_overlap, np.intersect1d(ID_unassign,highvel_IDs)) #need to re-evaluate the highvel_IDs even if they are in the region of only 1 halo.
+        halo_boolean_overlap = halo_boolean[np.intersect1d(ID_unassign, ID_overlap, return_indices=True)[1]]
+        #
         ID_indp = ID_unassign[overlap_boolean == 1]
-        halo_boolean_indp = halo_boolean[overlap_boolean == 1]
+        ID_indp = np.setdiff1d(ID_indp, highvel_IDs) #need to re-evaluate the highvel_IDs even if they are in the region of only 1 halo.
+        halo_boolean_indp = halo_boolean[np.intersect1d(ID_unassign, ID_indp, return_indices=True)[1]]
         #
         #The list of stars in each halo's region
         starmap_ID = []
@@ -273,8 +278,8 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         #
         if len(ID_overlap) > 0:
             ds = yt.load(pfs[idx])
-            pos_overlap = pos_unassign[overlap_boolean > 1]
-            vel_overlap = vel_unassign[overlap_boolean > 1]
+            pos_overlap = pos_unassign[np.intersect1d(ID_unassign, ID_overlap, return_indices=True)[1]]
+            vel_overlap = vel_unassign[np.intersect1d(ID_unassign, ID_overlap, return_indices=True)[1]]
             #overlap_energy_map is a dictionary that contains the energy of a star in each of its overlap regions
             overlap_energy_map = collections.defaultdict(list)
             #this for loop calculate the energy for all overlapped stars that are in the same halo to speed up time
@@ -290,12 +295,16 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
             for k in range(len(ID_overlap)):
                 overlap_branch = halo_wstars_branch[halo_boolean_overlap[k]]
                 E_list = overlap_energy_map[ID_overlap[k]]
+                if len(E_list) == 0:
+                    continue
                 if np.min(E_list) < 0:
                     bound_branch = overlap_branch[np.argmin(E_list)]
                     starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k]) 
                     print('For Star %s, the overlapped branches are %s and the energies are %s. This star is assigned to Branch %s.' % (ID_overlap[k], overlap_branch, E_list, bound_branch))
                 else:
                     print('For Star %s, the overlapped branches are %s and the energies are %s. This star is NOT bound to any branches.' % (ID_overlap[k], overlap_branch, E_list))
+                    highvel_IDs = np.append(highvel_IDs, ID_overlap[k])
+                    highvel_IDs = np.unique(highvel_IDs)
         len_starmap = [len(i) for i in starmap_ID]
         # Add stars to subsequent snapshots
         for i in range(len(halo_wstars_branch)):
@@ -326,6 +335,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         #ID_all_prev = ID_all
         np.save('%s/stars_assignment_step1_backup.npy' % (metadata_dir), output)
         np.save('%s/halo_wstars_map.npy' % (metadata_dir), halo_wstars_map)
+        np.save('%s/highvel_IDs.npy' % (metadata_dir), highvel_IDs)
         #
         if print_mode == True:
             print(idx, 'Number of total unassigned stars is:', len(ID_unassign))
