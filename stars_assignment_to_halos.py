@@ -265,6 +265,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         #
         ID_overlap = ID_unassign[overlap_boolean > 1]
         ID_overlap = np.append(ID_overlap, np.intersect1d(ID_unassign,highvel_IDs)) #need to re-evaluate the highvel_IDs even if they are in the region of only 1 halo.
+        ID_overlap = np.unique(ID_overlap)
         halo_boolean_overlap = halo_boolean[np.intersect1d(ID_unassign, ID_overlap, return_indices=True)[1]]
         #
         ID_indp = ID_unassign[overlap_boolean == 1]
