@@ -132,13 +132,19 @@ def region_number(idx, halo_dir):
     return region_idx
 
 def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
-    #load the refined region, we assume that stars only exist in this region
-    region_idx = region_number(idx, halo_dir)
-    refined_region = np.load(halo_dir + '/' + 'refined_region_%s.npy' % region_idx, allow_pickle=True).tolist()
     #
     ds = yt.load(pfs[idx])
-    ll_all = np.array(refined_region[0])
-    ur_all = np.array(refined_region[1])
+    #load the refined region, we assume that stars only exist in this region
+    #Combine all the refined regions from all timesteps 
+    ll_all,ur_all = np.array([1e99,1e99,1e99]),-1*np.array([1e99,1e99,1e99])
+    refined_files = glob.glob(halo_dir + '/' + 'refined_region_*.npy')
+    for file in refined_files:
+        ll_o,ur_o = np.load(file,allow_pickle=True).tolist()
+        ll_all = np.minimum(ll_all,np.array(ll_o))
+        ur_all = np.maximum(ur_all,np.array(ur_o))
+    buffer_all = (ur_all - ll_all)*0.05
+    ll_all, ur_all = ll_all - buffer_all, ur_all + buffer_all
+    #
     xx,yy,zz = np.meshgrid(np.linspace(ll_all[0],ur_all[0],numsegs),\
                 np.linspace(ll_all[1],ur_all[1],numsegs),np.linspace(ll_all[2],ur_all[2],numsegs))
 
