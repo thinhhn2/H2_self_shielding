@@ -52,24 +52,24 @@ def apply_savgol_filter(rawtree, halo_dir, halotree_ver):
         if len(idx_list) >= 23: #apply the filter when the data length is larger than 15
             position_list_f = savgol_filter(position_list, 11, 3, axis=0)
             radius_list_f = savgol_filter(radius_list, 11, 3)
-            log10mass_list_f = savgol_filter(np.log10(mass_list), 11, 3)
+            mass_list_f = savgol_filter(mass_list, 11, 3)
             vel_list_f = savgol_filter(vel_list, 11, 3, axis=0)
         elif len(idx_list) >= 12 and len(idx_list) < 23: #apply the filter when the data length is larger than 15
             position_list_f = savgol_filter(position_list, 6, 3, axis=0)
             radius_list_f = savgol_filter(radius_list, 6, 3)
-            log10mass_list_f = savgol_filter(np.log10(mass_list), 6, 3)
+            mass_list_f = savgol_filter(mass_list, 6, 3)
             vel_list_f = savgol_filter(vel_list, 6, 3, axis=0)
         else:
             position_list_f = position_list
             radius_list_f = radius_list
-            log10mass_list_f = np.log10(mass_list)
+            mass_list_f = mass_list
             vel_list_f = vel_list
         rawtree_s[branch] = {}
         for j in range(len(idx_list)):
             rawtree_s[branch][idx_list[j]] = {}
             rawtree_s[branch][idx_list[j]]['Halo_Center_s'] = position_list_f[j]
             rawtree_s[branch][idx_list[j]]['r200_s'] = radius_list_f[j]
-            rawtree_s[branch][idx_list[j]]['log10m200_s'] = log10mass_list_f[j]
+            rawtree_s[branch][idx_list[j]]['m200_s'] = mass_list_f[j]
             rawtree_s[branch][idx_list[j]]['Vel_Com_s'] = vel_list_f[j]
     np.save(halo_dir + '/halotree_%s_final_smoothed.npy' % halotree_ver, rawtree_s)
     return rawtree_s
