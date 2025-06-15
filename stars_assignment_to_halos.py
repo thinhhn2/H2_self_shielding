@@ -1,4 +1,4 @@
-#VERSION 11: RE-EVALUATING ENERGY FOR HIGH-VELOCITY STAR PARTICLES
+#VERSION 12: APPLY SAVGOL FILTER ONLY IF CALLED
 
 import numpy as np
 import yt
@@ -67,10 +67,10 @@ def apply_savgol_filter(rawtree, halo_dir, halotree_ver):
         rawtree_s[branch] = {}
         for j in range(len(idx_list)):
             rawtree_s[branch][idx_list[j]] = {}
-            rawtree_s[branch][idx_list[j]]['Halo_Center_s'] = position_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Halo_Radius_s'] = radius_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Halo_Mass_s'] = mass_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Vel_Com_s'] = vel_list_f[j]
+            rawtree_s[branch][idx_list[j]]['Halo_Center'] = position_list_f[j]
+            rawtree_s[branch][idx_list[j]]['Halo_Radius'] = radius_list_f[j]
+            rawtree_s[branch][idx_list[j]]['Halo_Mass'] = mass_list_f[j]
+            rawtree_s[branch][idx_list[j]]['Vel_Com'] = vel_list_f[j]
     np.save(halo_dir + '/halotree_%s_final_smoothed.npy' % halotree_ver, rawtree_s)
     return rawtree_s
 
@@ -80,9 +80,9 @@ def list_of_halos_wstars_idx(rawtree_s, pos_allstars, idx):
     halo_wstars_branch = np.array([])
     for branch, vals in rawtree_s.items():
         if idx in vals.keys():
-            if (np.linalg.norm(pos_allstars - rawtree_s[branch][idx]['Halo_Center_s'], axis=1) < rawtree_s[branch][idx]['Halo_Radius_s']).any():
-                halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center_s']))
-                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius_s'])
+            if (np.linalg.norm(pos_allstars - rawtree_s[branch][idx]['Halo_Center'], axis=1) < rawtree_s[branch][idx]['Halo_Radius']).any():
+                halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center']))
+                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius'])
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
@@ -93,14 +93,14 @@ def find_total_E(star_pos, star_vel, ds, rawtree_s, branch, idx):
         star_pos = star_pos.reshape(1,3)
         star_vel = star_vel.reshape(1,3)
     #
-    regA = ds.sphere(rawtree_s[branch][idx]['Halo_Center_s'], rawtree_s[branch][idx]['Halo_Radius_s'])
+    regA = ds.sphere(rawtree_s[branch][idx]['Halo_Center'], rawtree_s[branch][idx]['Halo_Radius'])
     #
     massA = regA['all','particle_mass'].to('kg')
     posA = regA['all','particle_position'].to('m')
     velA = regA['all','particle_velocity'].to('m/s')
     #
     boolmass = massA.to('Msun') > 1
-    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree_s[branch][idx]['Halo_Center_s'], axis=1) <= rawtree_s[branch][idx]['Halo_Radius_s']
+    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree_s[branch][idx]['Halo_Center'], axis=1) <= rawtree_s[branch][idx]['Halo_Radius']
     boolall = boolmass*boolloc
     #
     posA = posA[boolall]
@@ -113,7 +113,7 @@ def find_total_E(star_pos, star_vel, ds, rawtree_s, branch, idx):
     disAinv[np.isnan(disAinv)] = 0
     #
     PE = np.sum(-G.value*massA.to('kg').v*disAinv, axis=1)
-    velcom = (rawtree_s[branch][idx]['Vel_Com_s']*ds.units.code_length/ds.units.s).to('m/s').v
+    velcom = (rawtree_s[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
     E[np.isnan(E)] = 1e99
@@ -381,8 +381,8 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
             ID = ID_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
-            halo_center = rawtree_s[branch][idx]['Halo_Center_s']
-            halo_radius = rawtree_s[branch][idx]['Halo_Radius_s']
+            halo_center = rawtree_s[branch][idx]['Halo_Center']
+            halo_radius = rawtree_s[branch][idx]['Halo_Radius']
             #
             #remain_bool: stars that still remain in the halo where they are born
             #loss_bool: stars that move out of the halo where they were born 
@@ -495,6 +495,8 @@ if __name__ == "__main__":
     halo_dir = sys.argv[1]
     metadata_dir = sys.argv[2]
     halotree_ver = sys.argv[3]
+    rawtree_smooth = False 
+    #
     rawtree = np.load(halo_dir + '/halotree_%s_final.npy' % halotree_ver, allow_pickle=True).tolist()
     pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_%s.txt' % halotree_ver, dtype=str)[:,0]
     if yt.is_root():
@@ -510,13 +512,15 @@ if __name__ == "__main__":
     #
     if yt.is_root():
         #
-        if os.path.exists(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver) == False:
-            rawtree_s = apply_savgol_filter(rawtree, halo_dir, halotree_ver)
-        else:
-            rawtree_s = np.load(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver, allow_pickle=True).tolist()
-        print('Done smoothening halotree results')
+        if rawtree_smooth == True:
+            if os.path.exists(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver) == False:
+                rawtree_s = apply_savgol_filter(rawtree, halo_dir, halotree_ver)
+            else:
+                rawtree_s = np.load(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver, allow_pickle=True).tolist()
+            rawtree = rawtree_s
+            print('Done smoothening halotree results')
         #
-        stars_assign_output = stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True)
+        stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = True)
         np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
         #
         #This is to re-arange the data structure to match with Kirk's pipeline
