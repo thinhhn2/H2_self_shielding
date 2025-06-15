@@ -1,10 +1,9 @@
-#VERSION 12: APPLY SAVGOL FILTER ONLY IF CALLED
+#VERSION 13: REDUCE MEMORY LOAD AND IMPROVE CLEARER OUTPUT PRINTING 
 
 import numpy as np
 import yt
 from astropy.constants import G
 import astropy.units as u
-from tqdm import tqdm
 import os
 import glob as glob
 import healpy as hp
@@ -74,37 +73,35 @@ def apply_savgol_filter(rawtree, halo_dir, halotree_ver):
     np.save(halo_dir + '/halotree_%s_final_smoothed.npy' % halotree_ver, rawtree_s)
     return rawtree_s
 
-def list_of_halos_wstars_idx(rawtree_s, pos_allstars, idx):
+def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_pos = np.empty(shape=(0,3))
     halo_wstars_rvir = np.array([])
     halo_wstars_branch = np.array([])
-    for branch, vals in rawtree_s.items():
+    for branch, vals in rawtree.items():
         if idx in vals.keys():
-            if (np.linalg.norm(pos_allstars - rawtree_s[branch][idx]['Halo_Center'], axis=1) < rawtree_s[branch][idx]['Halo_Radius']).any():
+            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < rawtree[branch][idx]['Halo_Radius']).any():
                 halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center']))
                 halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius'])
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
-def find_total_E(star_pos, star_vel, ds, rawtree_s, branch, idx):
+def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     #This function finds the total energy of an array of star particles in one halo at a certain timestep.
     if star_pos.shape == (3,): #reshaping the star_pos and star_vel to be 2D arrays, in the case of a single star
         star_pos = star_pos.reshape(1,3)
         star_vel = star_vel.reshape(1,3)
     #
-    regA = ds.sphere(rawtree_s[branch][idx]['Halo_Center'], rawtree_s[branch][idx]['Halo_Radius'])
+    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
     #
     massA = regA['all','particle_mass'].to('kg')
     posA = regA['all','particle_position'].to('m')
-    velA = regA['all','particle_velocity'].to('m/s')
     #
     boolmass = massA.to('Msun') > 1
-    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree_s[branch][idx]['Halo_Center'], axis=1) <= rawtree_s[branch][idx]['Halo_Radius']
+    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= rawtree[branch][idx]['Halo_Radius']
     boolall = boolmass*boolloc
     #
     posA = posA[boolall]
-    velA = velA[boolall]
     massA = massA[boolall]
     #
     #use cdist, 100x faster
@@ -113,7 +110,7 @@ def find_total_E(star_pos, star_vel, ds, rawtree_s, branch, idx):
     disAinv[np.isnan(disAinv)] = 0
     #
     PE = np.sum(-G.value*massA.to('kg').v*disAinv, axis=1)
-    velcom = (rawtree_s[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
     E[np.isnan(E)] = 1e99
@@ -202,7 +199,7 @@ def extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir):
         np.save(metadata_dir + '/star_metadata_allbox_'+str(idx)+'.npy', output)
     return None
 
-def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
+def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
     """
     This function uniquely assigns each star in the simulation box to a halo. 
     There are two steps:
@@ -211,8 +208,8 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
     ---
     Input
     ---
-    rawtree_s: 
-      the smoothed SHINBAD merger tree output
+    rawtree: 
+      the SHINBAD merger tree output (can be smoothed if called)
     pfs: 
       the list of the snapshot's directory
     halo_dir:
@@ -243,7 +240,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         highvel_IDs = np.load(metadata_dir + '/' + 'highvel_IDs.npy', allow_pickle=True).tolist()
         starting_idx = list(halo_wstars_map.keys())[-1] + 1
     #------------------------------------------------------------------------
-    for idx in tqdm(range(starting_idx, len(pfs))):
+    for idx in range(starting_idx, len(pfs)):
         #
         metadata = np.load(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx, allow_pickle=True).tolist()
         pos_all = metadata['pos']
@@ -258,7 +255,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         pos_unassign = pos_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         vel_unassign = vel_all[np.intersect1d(ID_all, ID_unassign, return_indices=True)[1]]
         #Obtain the halos with stars
-        halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree_s, pos_all, idx)
+        halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = list_of_halos_wstars_idx(rawtree, pos_all, idx)
         halo_wstars_map[idx] = {} #stored it for later used in Step 2 of the code
         halo_wstars_map[idx]['pos'] = halo_wstars_pos
         halo_wstars_map[idx]['rvir'] = halo_wstars_rvir
@@ -296,7 +293,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
                 if len(ID_for_erg) > 0:
                     pos_for_erg = pos_overlap[halo_boolean_overlap[:,i_branch]]
                     vel_for_erg = vel_overlap[halo_boolean_overlap[:,i_branch]]
-                    E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree_s, halo_wstars_branch[i_branch], idx)
+                    E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree, halo_wstars_branch[i_branch], idx)
                     for k in range(len(ID_for_erg)):
                         overlap_energy_map[ID_for_erg[k]].append(E[k])
             for k in range(len(ID_overlap)):
@@ -307,16 +304,16 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
                 if np.min(E_list) < 0:
                     bound_branch = overlap_branch[np.argmin(E_list)]
                     starmap_ID[list(halo_wstars_branch).index(bound_branch)] = np.append(starmap_ID[list(halo_wstars_branch).index(bound_branch)], ID_overlap[k]) 
-                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is assigned to Branch %s.' % (ID_overlap[k], overlap_branch, E_list, bound_branch))
+                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is assigned to Branch %s.' % (int(ID_overlap[k]), overlap_branch, E_list, bound_branch))
                 else:
-                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is NOT bound to any branches.' % (ID_overlap[k], overlap_branch, E_list))
+                    print('For Star %s, the overlapped branches are %s and the energies are %s. This star is NOT bound to any branches.' % (int(ID_overlap[k]), overlap_branch, E_list))
                     highvel_IDs = np.append(highvel_IDs, ID_overlap[k])
                     highvel_IDs = np.unique(highvel_IDs)
         len_starmap = [len(i) for i in starmap_ID]
         # Add stars to subsequent snapshots
         for i in range(len(halo_wstars_branch)):
             if len(starmap_ID[i]) > 0: 
-                for j in extract_and_order_snapshotIdx(rawtree_s, halo_wstars_branch[i]): #assuming when a star forms inside a halo, it will not leave that halo 
+                for j in extract_and_order_snapshotIdx(rawtree, halo_wstars_branch[i]): #assuming when a star forms inside a halo, it will not leave that halo 
                     if int(j) >= idx:
                         if halo_wstars_branch[i] not in output[j].keys():
                             output[j][halo_wstars_branch[i]] = starmap_ID[i]
@@ -330,8 +327,8 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
                 for level in range(nlevels): #add the stars in the sub-branch to higher branches
                     deepest_lvl = loop_branch.split('_')[-1]
                     mainbranch = loop_branch.split('_' + deepest_lvl)[0]
-                    merge_timestep = np.max(extract_and_order_snapshotIdx(rawtree_s, loop_branch)) + 1
-                    last_timestep = np.max(extract_and_order_snapshotIdx(rawtree_s, mainbranch))
+                    merge_timestep = np.max(extract_and_order_snapshotIdx(rawtree, loop_branch)) + 1
+                    last_timestep = np.max(extract_and_order_snapshotIdx(rawtree, mainbranch))
                     for j in range(merge_timestep, last_timestep + 1):
                         if mainbranch not in output[j].keys():
                             output[j][mainbranch] = starmap_ID[i]
@@ -348,7 +345,11 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
             print(idx, 'Number of total unassigned stars is:', len(ID_unassign))
             print('Number of overlapped stars is', len(ID_overlap), ', Number of independent stars is', len(ID_indp))
             print('Halo with stars:', halo_wstars_branch)
-            print('Number of assingned stars in each halo:', len_starmap, '\n')
+            #For brevity, only print the halos with assigned stars in them at this timestep
+            print('Number of assingned stars in each halo:', dict(zip(np.array(halo_wstars_branch)[np.array(len_starmap) != 0], np.array(len_starmap)[np.array(len_starmap) != 0])), '\n') 
+        #Free some memory
+        del metadata, pos_all, ID_all, vel_all, ID_unassign, pos_unassign, vel_unassign, halo_boolean, overlap_boolean, ID_overlap,\
+              ID_indp, starmap_ID, ds, pos_overlap, vel_overlap, overlap_energy_map, ID_for_erg, pos_for_erg, vel_for_erg, E, E_list
     #------------------------------------------------------------------------
     #This step removes the stars that moves outside of the halo's virial radius and addes them to another halos if needed. 
     #The unique stellar mass and SFR is also calculated in this step. 
@@ -366,7 +367,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         reassign_dict = np.load(metadata_dir + '/' + 'reassign_dict_step2.npy', allow_pickle=True).tolist()
         prev_halo_map = np.load(metadata_dir + '/' + 'prev_halo_map_step2.npy', allow_pickle=True).tolist()
         starting_idx_step2 = list(output_final.keys())[-1] + 1
-    for idx in tqdm(range(starting_idx_step2, len(pfs))):
+    for idx in range(starting_idx_step2, len(pfs)):
         output_final[idx] = {}
         ds = yt.load(pfs[idx])
         #
@@ -375,14 +376,16 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         ID_all = metadata['ID'].astype(int)
         vel_all = metadata['vel']*1e3 #convert from km/s to m/s
         for branch in output[idx].keys():
+            if idx not in extract_and_order_snapshotIdx(rawtree, branch):
+                continue
             ID = output[idx][branch]
             #obtain the stars found in the initial output
             pos = pos_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             ID = ID_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
-            halo_center = rawtree_s[branch][idx]['Halo_Center']
-            halo_radius = rawtree_s[branch][idx]['Halo_Radius']
+            halo_center = rawtree[branch][idx]['Halo_Center']
+            halo_radius = rawtree[branch][idx]['Halo_Radius']
             #
             #remain_bool: stars that still remain in the halo where they are born
             #loss_bool: stars that move out of the halo where they were born 
@@ -411,6 +414,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
         vel_reassign = vel_all[np.intersect1d(ID_all, reassign_dict[idx], return_indices=True)[1]]
         ID_reassign = ID_all[np.intersect1d(ID_all, reassign_dict[idx], return_indices=True)[1]]
         print('At Snapshot', idx, ', %s stars need to be re-assigned' % len(reassign_dict[idx]))
+        del pos_all, vel_all
         halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch = halo_wstars_map[idx].values() #obtain the list of halos with stars, the halo_wstars_map is computed above
         halo_boolean_reassign = np.linalg.norm(pos_reassign[:, np.newaxis, :] - halo_wstars_pos, axis=2) <= halo_wstars_rvir
         for i_branch in range(len(halo_wstars_branch)):
@@ -418,7 +422,7 @@ def stars_assignment(rawtree_s, pfs, metadata_dir, print_mode = True):
             if len(ID_for_erg) > 0:
                 pos_for_erg = pos_reassign[halo_boolean_reassign[:,i_branch]]
                 vel_for_erg = vel_reassign[halo_boolean_reassign[:,i_branch]]
-                E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree_s, halo_wstars_branch[i_branch], idx)
+                E = find_total_E(pos_for_erg, vel_for_erg, ds, rawtree, halo_wstars_branch[i_branch], idx)
                 for k in range(len(ID_for_erg)):
                     reassign_energy_map[ID_for_erg[k]].append(E[k])
         for k in range(len(ID_reassign)):
@@ -504,7 +508,7 @@ if __name__ == "__main__":
         print(metadata_dir)
     #
     #This is to extract the star metadata from the simulation box
-    for idx in tqdm(range(0, len(pfs))):
+    for idx in range(0, len(pfs)):
         if os.path.exists(metadata_dir + '/' + 'star_metadata_allbox_%s.npy' % idx) == False:
             if yt.is_root():
                 print('Starting to extract metadata from Snapshot %s' % idx)
