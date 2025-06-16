@@ -418,8 +418,9 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             #For brevity, only print the halos with assigned stars in them at this timestep
             print('Number of assingned stars in each halo:', dict(zip(np.array(halo_wstars_branch)[np.array(len_starmap) != 0], np.array(len_starmap)[np.array(len_starmap) != 0])), '\n') 
         #Free some memory
-        del metadata, pos_all, ID_all, vel_all, ID_unassign, pos_unassign, vel_unassign, halo_boolean, overlap_boolean, ID_overlap,\
-              ID_indp, starmap_ID, ds, pos_overlap, vel_overlap, overlap_energy_map, ID_for_erg, pos_for_erg, vel_for_erg, E, E_list
+        del metadata, pos_all, ID_all, vel_all, ID_unassign, pos_unassign, vel_unassign, halo_boolean, overlap_boolean, ID_indp, starmap_ID
+        if len(ID_overlap) > 0:
+            del ID_overlap, ds, pos_overlap, vel_overlap, overlap_energy_map, ID_for_erg, pos_for_erg, vel_for_erg, E, E_list
     #------------------------------------------------------------------------
     #This step removes the stars that moves outside of the halo's virial radius and addes them to another halos if needed. 
     #The unique stellar mass and SFR is also calculated in this step. 
