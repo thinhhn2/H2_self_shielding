@@ -1,4 +1,4 @@
-#VERSION 13: REDUCE MEMORY LOAD AND IMPROVE CLEARER OUTPUT PRINTING 
+#VERSION 14: APPLY PARTICLE_CUTS WHEN THERE ARE MORE THAN A CERTAIN NUMBER OF PARTICLES (10000) IN A VOLUME
 
 import numpy as np
 import yt
@@ -85,6 +85,67 @@ def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
+def vecs_calc(nside):
+    pix = hp.nside2npix(nside)
+    theta, phi = hp.pix2ang(nside,np.arange(pix))
+    vecs = hp.ang2vec(np.array(theta),np.array(phi))
+    return vecs
+
+def cut_particles(pos,mass,center,cut_size=700,dense=False,segments=1,timing=0):
+    if timing:
+        time5 = time_sys.time()
+    bool = np.full(len(pos),True)
+    vec = {}
+    if not dense:
+        vec[0] = vecs_calc(1)
+        vec[1] = vecs_calc(1)
+        vec[2] = vecs_calc(1)
+    else:
+        vec[0] = vecs_calc(1)
+        vec[1] = vecs_calc(2)
+        vec[2] = vecs_calc(2)
+    dist_pos = np.linalg.norm(pos-center,axis=1)
+    inner = np.array([40,20,12])
+    annuli = np.linspace(0,dist_pos.max()/3,inner[0])
+    annuli2 = np.linspace(dist_pos.max()/3,2*dist_pos.max()/3,inner[1])[1:]
+    annuli3 = np.linspace(2*dist_pos.max()/3,dist_pos.max(),inner[2])[1:]
+    annuli = np.append(annuli,annuli2)
+    annuli = np.append(annuli,annuli3)
+    index = np.arange(len(pos))
+    for i in range(len(annuli)-1):
+        bool_in_0 = (dist_pos <= annuli[i+1])*(dist_pos > annuli[i])
+        cutlength = cut_size*annuli[i+1]/annuli[-1]
+        current_group = np.arange(len(inner))[(i >= np.cumsum(inner)-inner)*(i < np.cumsum(inner))][0]
+        pos_norm = dist_pos[bool_in_0][:,np.newaxis]
+        pos_in = pos[bool_in_0]
+        vec_ang = np.dot((pos_in-center),vec[current_group].T)
+        if len(np.unique(vec_ang)) != len(vec_ang):
+            vec_ang += vec_ang.min()*1e-5*np.random.random(len(vec_ang[0]))[np.newaxis,:]
+        #pos_group = np.searchsorted(vec_ang,vec_ang.max(axis=1))
+        pos_group = np.where(vec_ang == vec_ang.max(axis=1)[:,np.newaxis])[1]
+        # lenpos = len(pos_group)
+        # lenind = len(index[bool_in_0])
+        # if lenpos > lenind:
+        #     print('Mismatch',lenpos,lenind,vec_ang.shape,pos_in.shape,len(bool_in_0))
+        #     print(np.where(vec_ang == vec_ang.max(axis=1)[:,np.newaxis])[1].shape)
+        #     pos_group = pos_group[:-(lenpos-lenind)]
+        for t in range(len(vec[current_group])):
+            current_index = index[bool_in_0][pos_group==t]
+            if len(current_index) > max(cutlength,max(10/segments,1)):
+                mass_tot = mass[current_index].sum()
+                cut = int(np.ceil(len(current_index)/cutlength))
+                bool[current_index] = False
+                rand_ind = np.random.choice(current_index,size=len(current_index),replace=False)
+                bool[rand_ind[0::cut]] = True
+                mass_in = mass[rand_ind[0::cut]].sum()
+                mass[rand_ind[0::cut]] *= mass_tot/mass_in
+        if timing and time_sys.time()-time5 >timing:
+            print('Make Annuli',time_sys.time()-time5)
+            time5 = time_sys.time()
+    del pos
+    mass[index[np.logical_not(bool)]] *= 1e-10
+    return mass[bool], bool
+
 def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     #
     #This function finds the total energy of an array of star particles in one halo at a certain timestep.
@@ -104,13 +165,22 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     posA = posA[boolall]
     massA = massA[boolall]
     #
-    #use cdist, 100x faster
-    disAinv = 1/cdist((star_pos*ds.units.code_length).to('m').v, posA.v, 'euclidean')
-    disAinv[~np.isfinite(disAinv)] = 0
-    disAinv[np.isnan(disAinv)] = 0
+    if len(massA) > 10000:
+        centerA = (rawtree_s[branch][idx]['Halo_Center']*ds.units.code_length).to('m')
+        massA_cut, boolA_cut = cut_particles(posA.v,massA.v,centerA.v)
+        posA_cut = posA[boolA_cut]
+    else:
+        massA_cut = massA.to('kg').v
+        posA_cut = posA
+    del posA, massA
     #
-    PE = np.sum(-G.value*massA.to('kg').v*disAinv, axis=1)
-    velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    #use cdist, 100x faster
+    disAinv_cut = 1/cdist((star_pos*ds.units.code_length).to('m').v, posA_cut.v, 'euclidean')
+    disAinv_cut[~np.isfinite(disAinv_cut)] = 0
+    disAinv_cut[np.isnan(disAinv_cut)] = 0
+    #
+    PE = np.sum(-G.value*massA_cut*disAinv_cut, axis=1)
+    velcom = (rawtree_s[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
     E[np.isnan(E)] = 1e99
