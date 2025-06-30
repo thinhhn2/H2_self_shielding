@@ -1,4 +1,4 @@
-#VERSION 14: APPLY PARTICLE_CUTS WHEN THERE ARE MORE THAN A CERTAIN NUMBER OF PARTICLES (10000) IN A VOLUME
+#VERSION 15: USE 'R200' (OR CLOSEST VALUE TO IT) INSTEAD OF 'HALO_RADIUS' 
 
 import numpy as np
 import yt
@@ -31,47 +31,15 @@ def extract_and_order_snapshotIdx(rawtree, branch):
     snapshotIdx.sort()
     return snapshotIdx
 
-def extract_position_radius_mass_vel(rawtree, branch):
-    idx_list = extract_and_order_snapshotIdx(rawtree, branch)
-    radius_list = np.array([])
-    mass_list = np.array([])
-    position_list = np.empty(shape=(0,3))  
-    vel_list = np.empty(shape=(0,3))
-    for idx in idx_list:
-        radius_list = np.append(radius_list, rawtree[branch][idx]['Halo_Radius'])
-        mass_list = np.append(mass_list, rawtree[branch][idx]['Halo_Mass'])
-        position_list = np.vstack((position_list, rawtree[branch][idx]['Halo_Center']))
-        vel_list = np.vstack((vel_list, rawtree[branch][idx]['Vel_Com']))
-    return position_list, radius_list, mass_list, vel_list, idx_list
-
-def apply_savgol_filter(rawtree, halo_dir, halotree_ver):
-    rawtree_s = {}
-    for branch in rawtree.keys():
-        position_list, radius_list, mass_list, vel_list, idx_list = extract_position_radius_mass_vel(rawtree, branch)
-        if len(idx_list) >= 23: #apply the filter when the data length is larger than 15
-            position_list_f = savgol_filter(position_list, 11, 3, axis=0)
-            radius_list_f = savgol_filter(radius_list, 11, 3)
-            mass_list_f = savgol_filter(mass_list, 11, 3)
-            vel_list_f = savgol_filter(vel_list, 11, 3, axis=0)
-        elif len(idx_list) >= 12 and len(idx_list) < 23: #apply the filter when the data length is larger than 15
-            position_list_f = savgol_filter(position_list, 6, 3, axis=0)
-            radius_list_f = savgol_filter(radius_list, 6, 3)
-            mass_list_f = savgol_filter(mass_list, 6, 3)
-            vel_list_f = savgol_filter(vel_list, 6, 3, axis=0)
-        else:
-            position_list_f = position_list
-            radius_list_f = radius_list
-            mass_list_f = mass_list
-            vel_list_f = vel_list
-        rawtree_s[branch] = {}
-        for j in range(len(idx_list)):
-            rawtree_s[branch][idx_list[j]] = {}
-            rawtree_s[branch][idx_list[j]]['Halo_Center'] = position_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Halo_Radius'] = radius_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Halo_Mass'] = mass_list_f[j]
-            rawtree_s[branch][idx_list[j]]['Vel_Com'] = vel_list_f[j]
-    np.save(halo_dir + '/halotree_%s_final_smoothed.npy' % halotree_ver, rawtree_s)
-    return rawtree_s
+def get_r200_radius(rawtree, branch, idx):
+    #this function return r200 value or find the closest value to it (in case the halo does not have 'r200' radius)
+    if 'r200' in rawtree[branch][idx].keys():
+        return rawtree[branch][idx]['r200']
+    else:
+        key_list = list(rawtree[branch][idx].keys())
+        r_keys = np.array([x[1:] for x in key_list if x[0] =='r'])
+        r_key = r_keys[abs(r_keys.astype(float)-200)==abs(r_keys.astype(float)-200).min()][0]
+        return rawtree[branch][idx]['r'+r_key]
 
 def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_pos = np.empty(shape=(0,3))
@@ -79,9 +47,9 @@ def list_of_halos_wstars_idx(rawtree, pos_allstars, idx):
     halo_wstars_branch = np.array([])
     for branch, vals in rawtree.items():
         if idx in vals.keys():
-            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < rawtree[branch][idx]['Halo_Radius']).any():
+            if (np.linalg.norm(pos_allstars - rawtree[branch][idx]['Halo_Center'], axis=1) < get_r200_radius(rawtree, branch, idx)).any():
                 halo_wstars_pos = np.vstack((halo_wstars_pos, vals[idx]['Halo_Center']))
-                halo_wstars_rvir = np.append(halo_wstars_rvir, vals[idx]['Halo_Radius'])
+                halo_wstars_rvir = np.append(halo_wstars_rvir, get_r200_radius(rawtree, branch, idx))
                 halo_wstars_branch = np.append(halo_wstars_branch, branch)   
     return halo_wstars_pos, halo_wstars_rvir, halo_wstars_branch
 
@@ -153,20 +121,20 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
         star_pos = star_pos.reshape(1,3)
         star_vel = star_vel.reshape(1,3)
     #
-    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], rawtree[branch][idx]['Halo_Radius'])
+    regA = ds.sphere(rawtree[branch][idx]['Halo_Center'], get_r200_radius(rawtree, branch, idx))
     #
     massA = regA['all','particle_mass'].to('kg')
     posA = regA['all','particle_position'].to('m')
     #
     boolmass = massA.to('Msun') > 1
-    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= rawtree[branch][idx]['Halo_Radius']
+    boolloc = np.linalg.norm(posA.to('code_length').v - rawtree[branch][idx]['Halo_Center'], axis=1) <= get_r200_radius(rawtree, branch, idx)
     boolall = boolmass*boolloc
     #
     posA = posA[boolall]
     massA = massA[boolall]
     #
     if len(massA) > 10000:
-        centerA = (rawtree_s[branch][idx]['Halo_Center']*ds.units.code_length).to('m')
+        centerA = (rawtree[branch][idx]['Halo_Center']*ds.units.code_length).to('m')
         massA_cut, boolA_cut = cut_particles(posA.v,massA.v,centerA.v)
         posA_cut = posA[boolA_cut]
     else:
@@ -180,7 +148,7 @@ def find_total_E(star_pos, star_vel, ds, rawtree, branch, idx):
     disAinv_cut[np.isnan(disAinv_cut)] = 0
     #
     PE = np.sum(-G.value*massA_cut*disAinv_cut, axis=1)
-    velcom = (rawtree_s[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
+    velcom = (rawtree[branch][idx]['Vel_Com']*ds.units.code_length/ds.units.s).to('m/s').v
     KE = 0.5*np.linalg.norm(star_vel - velcom, axis=1)**2
     E = KE + PE
     E[np.isnan(E)] = 1e99
@@ -456,7 +424,7 @@ def stars_assignment(rawtree, pfs, metadata_dir, print_mode = True):
             vel = vel_all[np.intersect1d(ID_all, ID, return_indices=True)[1]]
             #
             halo_center = rawtree[branch][idx]['Halo_Center']
-            halo_radius = rawtree[branch][idx]['Halo_Radius']
+            halo_radius = get_r200_radius(rawtree, branch, idx)
             #
             #remain_bool: stars that still remain in the halo where they are born
             #loss_bool: stars that move out of the halo where they were born 
@@ -570,7 +538,6 @@ if __name__ == "__main__":
     halo_dir = sys.argv[1]
     metadata_dir = sys.argv[2]
     halotree_ver = sys.argv[3]
-    rawtree_smooth = False 
     #
     rawtree = np.load(halo_dir + '/halotree_%s_final.npy' % halotree_ver, allow_pickle=True).tolist()
     pfs = np.loadtxt(halo_dir + '/pfs_allsnaps_%s.txt' % halotree_ver, dtype=str)[:,0]
@@ -586,14 +553,6 @@ if __name__ == "__main__":
             extract_star_metadata(pfs, idx, numsegs, halo_dir, metadata_dir)
     #
     if yt.is_root():
-        #
-        if rawtree_smooth == True:
-            if os.path.exists(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver) == False:
-                rawtree_s = apply_savgol_filter(rawtree, halo_dir, halotree_ver)
-            else:
-                rawtree_s = np.load(halo_dir + '/' + 'halotree_%s_final_smoothed.npy' % halotree_ver, allow_pickle=True).tolist()
-            rawtree = rawtree_s
-            print('Done smoothening halotree results')
         #
         stars_assign_output = stars_assignment(rawtree, pfs, metadata_dir, print_mode = True)
         np.save(metadata_dir + '/stars_assignment_snapFirst.npy', stars_assign_output)
